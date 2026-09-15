@@ -16,7 +16,7 @@ Es una **PWA** (aplicación web progresiva): se instala en Android como una app 
 
 ## Instalar en Android
 
-1. Publica la carpeta `ifbb-pro-agent/` en una URL con HTTPS. La forma más sencilla es **GitHub Pages**: en el repositorio ve a *Settings → Pages → Source: GitHub Actions*. El flujo `.github/workflows/pages.yml` ya está incluido y despliega automáticamente cuando hay cambios en `main`.
+1. Publica la carpeta `ifbb-pro-agent/` en una URL con HTTPS. La forma más sencilla es **GitHub Pages**: el flujo `.github/workflows/pages.yml` activa Pages por sí mismo y despliega automáticamente cuando hay cambios en `main`. Si el paso *configure-pages* fallara, actívalo a mano en *Settings → Pages → Source: GitHub Actions* y vuelve a lanzar el flujo desde la pestaña *Actions*.
 2. Abre la URL en **Chrome** desde el teléfono.
 3. Pulsa **Instalar** en la cabecera de la app (o menú ⋮ → *Añadir a pantalla de inicio* / *Instalar aplicación*).
 4. La app queda en el cajón de aplicaciones y funciona sin conexión.
