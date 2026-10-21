@@ -163,6 +163,13 @@
       url: 'https://www.ifbbpro.com/rules/',
       type: 'Reglamento federativo',
     },
+    WHO_PA: {
+      id: 'WHO_PA',
+      short: 'OMS 2020: actividad física y sedentarismo',
+      title: 'World Health Organization. WHO guidelines on physical activity and sedentary behaviour. 2020. Recomienda ≥150-300 min/semana de actividad aeróbica moderada para la salud cardiovascular, incluso durante fases de entrenamiento centradas en otro objetivo.',
+      url: 'https://www.who.int/publications/i/item/9789240015128',
+      type: 'Organismo regulatorio internacional',
+    },
     SCHOENFELD_MEAL: {
       id: 'SCHOENFELD_MEAL',
       short: 'Schoenfeld & Aragon 2018 (JISSN)',
@@ -329,6 +336,17 @@
     ],
   };
 
+  /* DEC-005: ejercicios funcionales extra, solo entran en el plan si el
+   * perfil activa la bandera "salud/funcional" (criterio de la app, sin
+   * respaldo específico en la literatura citada). */
+  const FUNCTIONAL_EXERCISES = {
+    quads: [
+      { name: 'Sentadilla búlgara con mancuernas', type: 'compound', reps: [8, 12] },
+      { name: 'Step-up con carga', type: 'compound', reps: [8, 12] },
+      { name: 'Paseo del granjero', type: 'compound', reps: [20, 40] },
+    ],
+  };
+
   const MUSCLE_LABELS = {
     chest: 'Pecho', back: 'Espalda', shoulders: 'Hombros', quads: 'Cuádriceps',
     hamstrings: 'Isquiotibiales', glutes: 'Glúteos', calves: 'Pantorrillas',
@@ -345,5 +363,5 @@
     { name: 'Multivitamínico / vitamina D', dose: 'Según analítica', source: 'HELMS_NUT', note: 'Recomendado en dietas de preparación prolongadas por riesgo de deficiencias. Confirmar con análisis de sangre.' },
   ];
 
-  return { SOURCES, ACTIVITY, DIVISIONS, CLASSIC_WEIGHT_TABLE, EXERCISES, MUSCLE_LABELS, SUPPLEMENTS };
+  return { SOURCES, ACTIVITY, DIVISIONS, CLASSIC_WEIGHT_TABLE, EXERCISES, FUNCTIONAL_EXERCISES, MUSCLE_LABELS, SUPPLEMENTS };
 });

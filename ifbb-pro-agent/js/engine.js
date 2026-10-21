@@ -67,8 +67,16 @@
     const bmi = p.weightKg / (h * h);
 
     let bodyFat = null, bfMethod = null;
-    if (p.bodyFatPct > 0) { bodyFat = p.bodyFatPct; bfMethod = 'medido (DXA, plicometría, BIA…)'; }
-    else {
+    if (p.bodyFatPct > 0) {
+      bodyFat = p.bodyFatPct; bfMethod = 'medido (DXA, plicometría, BIA…)';
+      // DEC-004: si además hay circunferencias, se contrasta con el método
+      // Navy (error típico ±3-4 %, Hodgdon & Beckett 1984). Una diferencia
+      // grande (umbral de criterio de la app) sugiere un dato mal tomado.
+      const navyCheck = bodyFatNavy(p.sex, p.heightCm, p.neckCm, p.waistCm, p.hipCm);
+      if (navyCheck != null && Math.abs(navyCheck - bodyFat) > 4) {
+        warnings.push({ level: 'warn', text: `El % de grasa indicado (${round(bodyFat, 1)} %) y el estimado por circunferencias (${round(navyCheck, 1)} %) difieren en más de 4 puntos. Revisa las medidas: se usa el valor indicado (${round(bodyFat, 1)} %) para el resto del plan.` });
+      }
+    } else {
       const navy = bodyFatNavy(p.sex, p.heightCm, p.neckCm, p.waistCm, p.hipCm);
       if (navy != null) { bodyFat = navy; bfMethod = 'estimado por circunferencias (Navy ±3-4 %)'; }
     }
@@ -325,14 +333,25 @@
     const cutFactor = p.goal === 'cut' ? 0.85 : 1; // HELMS_TRAIN: en déficit se prioriza intensidad y se modera el volumen
     const emph = EMPHASIS_MAP[p.division] || { up: [], down: [] };
     const small = ['biceps', 'triceps', 'calves', 'abs'];
+    const lagging = new Set(p.laggingMuscles || []); // DEC-001
 
     const weeklySets = {};
+    const laggingApplied = {};
     Object.keys(K.EXERCISES).forEach(mu => {
-      let s = base * cutFactor;
-      if (small.includes(mu)) s *= 0.6;
-      if (emph.up.includes(mu)) s *= 1.25;
-      if (emph.down.includes(mu)) s *= 0.5;
-      weeklySets[mu] = Math.max(4, Math.round(s));
+      if (lagging.has(mu)) {
+        // DEC-001: un grupo rezagado anula el énfasis de división (incluida
+        // una posible reducción ×0,5) y el recorte de músculo pequeño.
+        // Tope semanal 20 series/grupo (criterio de la app).
+        const s = base * cutFactor * 1.25;
+        weeklySets[mu] = Math.min(20, Math.max(4, Math.round(s)));
+        laggingApplied[mu] = true;
+      } else {
+        let s = base * cutFactor;
+        if (small.includes(mu)) s *= 0.6;
+        if (emph.up.includes(mu)) s *= 1.25;
+        if (emph.down.includes(mu)) s *= 0.5;
+        weeklySets[mu] = Math.max(4, Math.round(s));
+      }
     });
 
     const freq = {};
@@ -340,39 +359,77 @@
 
     const remaining = Object.assign({}, weeklySets);
     const rotate = {};
+    const rotateExtra = {}; // DEC-005
     const sessions = split.days.map(d => {
       const exercises = [];
       d.muscles.forEach(mu => {
+        // DEC-005: con la bandera "salud/funcional" activa, pierna suma
+        // sentadilla búlgara, step-up con carga y paseo del granjero a su
+        // rotación de ejercicios. Desactivada (por defecto), el catálogo es
+        // el mismo de siempre.
+        const extra = p.healthGoal ? (K.FUNCTIONAL_EXERCISES[mu] || []) : [];
         const lib = K.EXERCISES[mu];
         const perSession = Math.max(2, Math.round(weeklySets[mu] / freq[mu]));
         const sets = Math.min(perSession, Math.max(0, remaining[mu]));
         remaining[mu] -= sets;
         if (sets <= 0) return;
         const idx = rotate[mu] = (rotate[mu] || 0);
-        const picks = sets <= 4 ? [lib[idx % lib.length]] : [lib[idx % lib.length], lib[(idx + 1) % lib.length]];
+        let picks = sets <= 4 ? [lib[idx % lib.length]] : [lib[idx % lib.length], lib[(idx + 1) % lib.length]];
         rotate[mu] = idx + picks.length;
+        if (extra.length) {
+          // Si hay extras activos (DEC-005), uno de los huecos de la sesión
+          // los usa en rotación propia, para que de verdad entren al plan y
+          // no queden solo como entradas al final de una lista que nunca se
+          // recorre tan lejos.
+          const ridx = rotateExtra[mu] = (rotateExtra[mu] || 0);
+          rotateExtra[mu] = ridx + 1;
+          const slot = picks.length - 1;
+          picks = picks.slice(); picks[slot] = extra[ridx % extra.length];
+        }
         const per = Math.floor(sets / picks.length);
         let rest = sets - per * picks.length;
         picks.forEach(ex => {
           const n = per + (rest-- > 0 ? 1 : 0);
-          exercises.push({ muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: ex.name, sets: n, reps: `${ex.reps[0]}-${ex.reps[1]}`, rir: ex.type === 'compound' ? '2-3' : '1-2', rest: ex.type === 'compound' ? '2-3 min' : '60-90 s' });
+          exercises.push({ muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: ex.name, type: ex.type, sets: n, reps: `${ex.reps[0]}-${ex.reps[1]}`, rir: ex.type === 'compound' ? '2-3' : '1-2', rest: ex.type === 'compound' ? '2-3 min' : '60-90 s' });
         });
       });
       return { name: d.name, exercises, totalSets: exercises.reduce((a, e) => a + e.sets, 0) };
     });
 
+    // DEC-002: en definición, el primer multiarticular de cada día lleva un
+    // top set pesado (no suma series nuevas: la primera de sus series pasa a
+    // ser el top set y el resto queda como back-off al -10% de carga).
+    if (p.goal === 'cut') {
+      sessions.forEach(s => {
+        const idx = s.exercises.findIndex(e => e.type === 'compound');
+        if (idx === -1) return;
+        const ex = s.exercises[idx];
+        s.exercises[idx] = Object.assign({}, ex, {
+          topSet: { reps: '4-6', rir: '1-2' },
+          backoffSets: Math.max(0, ex.sets - 1),
+          backoffPct: -10,
+        });
+      });
+    }
+
+    // DEC-005: con la bandera activa, en definición el cardio deja de
+    // minimizarse y respeta un piso de 150 min/semana a intensidad moderada
+    // (OMS 2020 / ACSM 2011), aunque eso implique más interferencia con la
+    // fuerza de la que recomienda Helms et al. 2015 para solo rendimiento.
     const cardio = p.goal === 'cut'
-      ? { sessions: p.level === 'advanced' ? 3 : 2, minutes: 25, type: 'LISS (caminata inclinada, bici, elíptica) al 60-70 % FC máx.; opcional 1 sesión HIIT de 10-15 min', rule: 'La mínima cantidad necesaria para mantener el ritmo de pérdida; añade 10 min/sesión solo si el peso se estanca 2 semanas. Sepáralo del entrenamiento de fuerza o hazlo después.' }
+      ? (p.healthGoal
+        ? { sessions: 3, minutes: 50, type: 'Cardio moderado (caminata, bici, elíptica) al 60-70 % FC máx.', rule: 'Objetivo "salud/funcional" activo: el cardio no se recorta por estar en definición; se mantiene el piso de 150 min/semana recomendado para la salud cardiovascular, aunque interfiera algo más con la ganancia de fuerza.' }
+        : { sessions: p.level === 'advanced' ? 3 : 2, minutes: 25, type: 'LISS (caminata inclinada, bici, elíptica) al 60-70 % FC máx.; opcional 1 sesión HIIT de 10-15 min', rule: 'La mínima cantidad necesaria para mantener el ritmo de pérdida; añade 10 min/sesión solo si el peso se estanca 2 semanas. Sepáralo del entrenamiento de fuerza o hazlo después.' })
       : { sessions: 2, minutes: 25, type: 'Cardio moderado por salud cardiovascular', rule: 'Sin objetivo de gasto: mantiene la capacidad aeróbica y la salud (150 min/semana moderado como referencia general). No interfiere con la hipertrofia a este volumen.' };
 
     return {
-      splitName: split.name, daysPerWeek: days, weeklySets, sessions,
+      splitName: split.name, daysPerWeek: days, weeklySets, laggingApplied, sessions,
       intensity: 'La mayoría de series en 6-12 repeticiones al 70-80 % del 1RM, terminando a 1-3 repeticiones del fallo (RIR). Aislamientos hasta 15 repeticiones.',
       progression: 'Doble progresión: cuando completes el rango alto de repeticiones en todas las series con buena técnica, sube la carga 2-5 % (tren superior) o 5-10 % (tren inferior) y vuelve al rango bajo.',
       deload: 'Cada 4-6 semanas, o cuando el rendimiento caiga 2 sesiones seguidas, reduce el volumen a la mitad durante una semana manteniendo la carga.',
       cardio,
       posing: p.division.startsWith('general') ? null : 'Practica las poses obligatorias de tu división 2-3 veces/semana durante 10-15 min; en las últimas 8 semanas a diario. Es parte del juicio y también gasto energético.',
-      sources: ['HELMS_TRAIN', 'SCHOENFELD_VOL', 'SCHOENFELD_FREQ', 'ACSM_RT', 'ACSM_CARDIO'],
+      sources: ['HELMS_TRAIN', 'SCHOENFELD_VOL', 'SCHOENFELD_FREQ', 'ACSM_RT', 'ACSM_CARDIO', 'WHO_PA'],
     };
   }
 
@@ -399,6 +456,9 @@
     const sex = src.sex === 'F' ? 'F' : 'M';
     let division = src.division;
     if (!K.DIVISIONS[division] || K.DIVISIONS[division].sex !== sex) division = sex === 'M' ? 'general_m' : 'general_w';
+    const validMuscles = Object.keys(K.EXERCISES);
+    const laggingRaw = Array.isArray(src.laggingMuscles) ? src.laggingMuscles : (src.laggingMuscles ? [src.laggingMuscles] : []);
+    const laggingMuscles = unique(laggingRaw.filter(m => validMuscles.includes(m)));
     return {
       name: (src.name || 'Perfil').toString().trim(),
       sex, age: n(src.age), heightCm: n(src.heightCm), weightKg: n(src.weightKg),
@@ -408,6 +468,7 @@
       daysPerWeek: n(src.daysPerWeek) || 4,
       division, goal: ['cut', 'bulk', 'maintain'].includes(src.goal) ? src.goal : 'cut',
       targetDate: src.targetDate || '', targetBf: n(src.targetBf), classicLimitLb: n(src.classicLimitLb),
+      laggingMuscles, healthGoal: !!src.healthGoal,
     };
   }
 

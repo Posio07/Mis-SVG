@@ -107,6 +107,75 @@ test('validateProfile catches missing data', () => {
   assert.deepEqual(E.validateProfile(male), []);
 });
 
+test('DEC-001: grupos rezagados anulan el énfasis de división y suben el volumen', () => {
+  const base = Object.assign({}, male, { division: 'physique_m', goal: 'cut' });
+  const withoutLagging = E.buildPlan(base, TODAY).training.weeklySets;
+  assert.equal(withoutLagging.quads, 6); // 14*0.85*0.5 (énfasis "down" de physique_m) = 5.95 -> 6
+  const withLagging = E.buildPlan(Object.assign({}, base, { laggingMuscles: ['quads', 'hamstrings', 'glutes'] }), TODAY).training.weeklySets;
+  assert.equal(withLagging.quads, 15); // 14*0.85*1.25 = 14.875 -> 15
+  assert.equal(withLagging.hamstrings, 15);
+  assert.equal(withLagging.glutes, 15);
+  assert.equal(withLagging.chest, withoutLagging.chest, 'músculos no rezagados no deberían cambiar');
+});
+
+test('DEC-001: tope de 20 series/semana para un grupo rezagado', () => {
+  const plan = E.buildPlan(Object.assign({}, male, { level: 'advanced', goal: 'bulk', laggingMuscles: ['chest'] }), TODAY);
+  assert.ok(plan.training.weeklySets.chest <= 20);
+});
+
+test('DEC-001: entradas inválidas en laggingMuscles se ignoran', () => {
+  const p = E.normalizeProfile(Object.assign({}, male, { laggingMuscles: ['quads', 'no-existe', 'quads'] }));
+  assert.deepEqual(p.laggingMuscles, ['quads']);
+});
+
+test('DEC-002: top set solo en definición, no cambia el total de series', () => {
+  const cut = E.buildPlan(male, TODAY).training;
+  const firstCompoundHasTopSet = cut.sessions.every(s => {
+    const idx = s.exercises.findIndex(e => e.type === 'compound');
+    return idx === -1 || s.exercises[idx].topSet;
+  });
+  assert.ok(firstCompoundHasTopSet, 'todas las sesiones de definición deberían tener top set en su primer multiarticular');
+  assert.ok(cut.sessions.some(s => s.exercises.some(e => e.topSet)), 'al menos una sesión debe mostrar un top set');
+
+  const maintain = E.buildPlan(Object.assign({}, male, { goal: 'maintain' }), TODAY).training;
+  assert.ok(maintain.sessions.every(s => s.exercises.every(e => !e.topSet)), 'en mantenimiento no debería aparecer top set');
+  const bulk = E.buildPlan(Object.assign({}, male, { goal: 'bulk' }), TODAY).training;
+  assert.ok(bulk.sessions.every(s => s.exercises.every(e => !e.topSet)), 'en volumen no debería aparecer top set');
+});
+
+test('DEC-004: aviso de inconsistencia si %grasa medido y Navy difieren más de 4 puntos', () => {
+  // Navy con estos datos (178cm, cuello 40, cintura 110) da ~27-28%.
+  const big = E.buildPlan(Object.assign({}, male, { bodyFatPct: 15, neckCm: 40, waistCm: 110 }), TODAY);
+  assert.ok(big.warnings.some(w => /difieren en más de 4 puntos/.test(w.text)), 'debería avisar con diferencia grande');
+  assert.equal(big.metrics.bodyFat, 15, 'se sigue usando el % medido, no el de Navy');
+
+  // Diferencia pequeña: cintura 85 da un Navy cercano a 15-16%.
+  const small = E.buildPlan(Object.assign({}, male, { bodyFatPct: 15, neckCm: 40, waistCm: 85 }), TODAY);
+  assert.ok(!small.warnings.some(w => /difieren en más de 4 puntos/.test(w.text)), 'no debería avisar con diferencia chica');
+});
+
+test('DEC-005: bandera salud/funcional sube el cardio en definición a >=150 min/semana', () => {
+  const off = E.buildPlan(male, TODAY).training.cardio; // male = cut, sin bandera
+  assert.ok(off.sessions * off.minutes < 150, 'por defecto el cardio en definición sigue minimizado');
+  const on = E.buildPlan(Object.assign({}, male, { healthGoal: true }), TODAY).training.cardio;
+  assert.ok(on.sessions * on.minutes >= 150, `con la bandera activa debería haber >=150 min/semana, hay ${on.sessions * on.minutes}`);
+});
+
+test('DEC-005: bandera desactivada no cambia nada (regresión) y activada agrega ejercicios funcionales a pierna', () => {
+  const withoutFlag = E.buildPlan(male, TODAY);
+  assert.equal(withoutFlag.training.cardio.sessions * withoutFlag.training.cardio.minutes, 2 * 25, 'cardio de cut sin bandera no debería cambiar');
+  const withFlag = E.buildPlan(Object.assign({}, male, { healthGoal: true, daysPerWeek: 6, level: 'advanced' }), TODAY);
+  const names = withFlag.training.sessions.flatMap(s => s.exercises.map(e => e.name));
+  const hasFunctional = names.some(n => /Sentadilla búlgara con mancuernas|Step-up con carga|Paseo del granjero/.test(n));
+  assert.ok(hasFunctional, 'con la bandera activa debería poder aparecer algún ejercicio funcional de pierna');
+});
+
+test('DEC-005: healthGoal no es true por defecto ni con valores falsy', () => {
+  assert.equal(E.normalizeProfile(male).healthGoal, false);
+  assert.equal(E.normalizeProfile(Object.assign({}, male, { healthGoal: false })).healthGoal, false);
+  assert.equal(E.normalizeProfile(Object.assign({}, male, { healthGoal: true })).healthGoal, true);
+});
+
 test('every source referenced by plan exists in knowledge base', () => {
   const plan = E.buildPlan(male, TODAY);
   plan.sourcesUsed.forEach(id => assert.ok(K.SOURCES[id], `missing source ${id}`));

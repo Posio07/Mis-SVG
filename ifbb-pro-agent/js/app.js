@@ -200,6 +200,9 @@
           </select>
           <label>Días de entrenamiento por semana *</label>
           <select name="daysPerWeek">${[3, 4, 5, 6].map(n => `<option value="${n}" ${Number(d.daysPerWeek) === n ? 'selected' : ''}>${n} días</option>`).join('')}</select>
+          <label>Grupos musculares rezagados (opcional)</label>
+          <p class="help">Reciben un 25 % más de series que el resto, por encima incluso del recorte que les tocaría por tu división.</p>
+          <div class="row3">${Object.entries(KNOWLEDGE.MUSCLE_LABELS).map(([id, label]) => `<label style="display:flex;align-items:center;gap:.4rem;margin:.2rem 0;font-size:.85rem;color:var(--fg)"><input type="checkbox" name="laggingMuscles" value="${id}" style="width:auto" ${(d.laggingMuscles || []).includes(id) ? 'checked' : ''}> ${esc(label)}</label>`).join('')}</div>
         </fieldset>
         <fieldset>
           <legend>Objetivo</legend>
@@ -221,6 +224,8 @@
             <input name="classicLimitLb" type="number" inputmode="numeric" value="${esc(d.classicLimitLb || '')}" placeholder="Deja vacío para usar la tabla orientativa">
             <p class="help">La tabla incluida es la de agosto de 2023 y no pudo verificarse contra el reglamento vigente. Si conoces el límite actual, escríbelo aquí.</p>
           </div>
+          <label style="display:flex;align-items:center;gap:.5rem;margin-top:1rem"><input type="checkbox" name="healthGoal" style="width:auto" ${d.healthGoal ? 'checked' : ''}> Priorizar salud/funcional sobre estética</label>
+          <p class="help">En definición, mantiene el cardio en 150 min/semana en vez de recortarlo, y suma sentadilla búlgara, step-up con carga y paseo del granjero a la rutina de pierna.</p>
         </fieldset>
         <div id="form-errors"></div>
         <div class="btn-row">
@@ -247,7 +252,9 @@
 
     form.onsubmit = e => {
       e.preventDefault();
-      const data = Object.fromEntries(new FormData(form).entries());
+      const fd = new FormData(form);
+      const data = Object.fromEntries(fd.entries());
+      data.laggingMuscles = fd.getAll('laggingMuscles');
       const errors = ENGINE.validateProfile(data);
       if (errors.length) { $('#form-errors').innerHTML = errors.map(x => `<div class="alert danger">${esc(x)}</div>`).join(''); window.scrollTo({ top: document.body.scrollHeight }); return; }
       const norm = ENGINE.normalizeProfile(data);
@@ -375,7 +382,7 @@
 
   function htmlTraining(plan) {
     const tr = plan.training, t = plan.targets;
-    const setsRows = Object.entries(tr.weeklySets).map(([mu, s]) => `<tr><td>${esc(KNOWLEDGE.MUSCLE_LABELS[mu])}</td><td class="num">${s}</td></tr>`).join('');
+    const setsRows = Object.entries(tr.weeklySets).map(([mu, s]) => `<tr><td>${esc(KNOWLEDGE.MUSCLE_LABELS[mu])}${tr.laggingApplied[mu] ? ' <span class="cite" title="Grupo rezagado: +25 % de series, anula el énfasis de la división">rezagado</span>' : ''}</td><td class="num">${s}</td></tr>`).join('');
     return `
       <div class="card accent">
         <h2>Entrenamiento · ${esc(tr.splitName)}</h2>
@@ -389,7 +396,7 @@
         <div class="src">Fuentes: ${cite(tr.sources)}</div>
       </div>
       ${tr.sessions.map(s => `<div class="session"><h4>${esc(s.name)} <small>${s.totalSets} series</small></h4>
-        ${s.exercises.map(e => `<div class="ex"><div><div class="n">${esc(e.name)}</div><div class="m">${esc(e.muscleLabel)} · RIR ${e.rir} · descanso ${e.rest}</div></div><div class="s">${e.sets} × ${e.reps}</div></div>`).join('')}
+        ${s.exercises.map(e => e.topSet ? `<div class="ex"><div><div class="n">${esc(e.name)} <span class="cite" title="Serie pesada previa al back-off, Helms et al. 2015 / ACSM 2009">Top set</span></div><div class="m">${esc(e.muscleLabel)} · RIR ${e.topSet.rir} · descanso 3 min</div></div><div class="s">1 × ${e.topSet.reps}</div></div>${e.backoffSets > 0 ? `<div class="ex"><div><div class="n">${esc(e.name)} · back-off (−10 % carga)</div><div class="m">${esc(e.muscleLabel)} · RIR ${e.rir} · descanso ${e.rest}</div></div><div class="s">${e.backoffSets} × ${e.reps}</div></div>` : ''}` : `<div class="ex"><div><div class="n">${esc(e.name)}</div><div class="m">${esc(e.muscleLabel)} · RIR ${e.rir} · descanso ${e.rest}</div></div><div class="s">${e.sets} × ${e.reps}</div></div>`).join('')}
       </div>`).join('')}
       <div class="card">
         <h3>Cardio</h3>
