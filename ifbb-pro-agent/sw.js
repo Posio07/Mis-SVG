@@ -1,6 +1,6 @@
 /* Service worker: precarga todos los recursos para que la app funcione sin conexión.
  * Sube CACHE_VERSION en cada despliegue para invalidar la caché antigua. */
-const CACHE_VERSION = 'ifbb-agent-v1';
+const CACHE_VERSION = 'ifbb-agent-v2';
 const ASSETS = [
   './',
   './index.html',
@@ -25,18 +25,18 @@ self.addEventListener('activate', event => {
   );
 });
 
+// Red primero: si hay conexión, siempre se sirve y se guarda la versión más
+// reciente (evita quedarse "una visita atrás" como pasaba con cache-first).
+// Sin conexión, cae a lo último guardado.
 self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return;
   event.respondWith(
-    caches.match(event.request, { ignoreSearch: true }).then(cached => {
-      const network = fetch(event.request).then(res => {
-        if (res && res.ok && new URL(event.request.url).origin === self.location.origin) {
-          const copy = res.clone();
-          caches.open(CACHE_VERSION).then(c => c.put(event.request, copy));
-        }
-        return res;
-      }).catch(() => cached);
-      return cached || network;
-    })
+    fetch(event.request).then(res => {
+      if (res && res.ok && new URL(event.request.url).origin === self.location.origin) {
+        const copy = res.clone();
+        caches.open(CACHE_VERSION).then(c => c.put(event.request, copy));
+      }
+      return res;
+    }).catch(() => caches.match(event.request, { ignoreSearch: true }))
   );
 });
