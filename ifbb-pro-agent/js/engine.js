@@ -325,14 +325,25 @@
     const cutFactor = p.goal === 'cut' ? 0.85 : 1; // HELMS_TRAIN: en déficit se prioriza intensidad y se modera el volumen
     const emph = EMPHASIS_MAP[p.division] || { up: [], down: [] };
     const small = ['biceps', 'triceps', 'calves', 'abs'];
+    const lagging = new Set(p.laggingMuscles || []); // DEC-001
 
     const weeklySets = {};
+    const laggingApplied = {};
     Object.keys(K.EXERCISES).forEach(mu => {
-      let s = base * cutFactor;
-      if (small.includes(mu)) s *= 0.6;
-      if (emph.up.includes(mu)) s *= 1.25;
-      if (emph.down.includes(mu)) s *= 0.5;
-      weeklySets[mu] = Math.max(4, Math.round(s));
+      if (lagging.has(mu)) {
+        // DEC-001: un grupo rezagado anula el énfasis de división (incluida
+        // una posible reducción ×0,5) y el recorte de músculo pequeño.
+        // Tope semanal 20 series/grupo (criterio de la app).
+        const s = base * cutFactor * 1.25;
+        weeklySets[mu] = Math.min(20, Math.max(4, Math.round(s)));
+        laggingApplied[mu] = true;
+      } else {
+        let s = base * cutFactor;
+        if (small.includes(mu)) s *= 0.6;
+        if (emph.up.includes(mu)) s *= 1.25;
+        if (emph.down.includes(mu)) s *= 0.5;
+        weeklySets[mu] = Math.max(4, Math.round(s));
+      }
     });
 
     const freq = {};
@@ -366,7 +377,7 @@
       : { sessions: 2, minutes: 25, type: 'Cardio moderado por salud cardiovascular', rule: 'Sin objetivo de gasto: mantiene la capacidad aeróbica y la salud (150 min/semana moderado como referencia general). No interfiere con la hipertrofia a este volumen.' };
 
     return {
-      splitName: split.name, daysPerWeek: days, weeklySets, sessions,
+      splitName: split.name, daysPerWeek: days, weeklySets, laggingApplied, sessions,
       intensity: 'La mayoría de series en 6-12 repeticiones al 70-80 % del 1RM, terminando a 1-3 repeticiones del fallo (RIR). Aislamientos hasta 15 repeticiones.',
       progression: 'Doble progresión: cuando completes el rango alto de repeticiones en todas las series con buena técnica, sube la carga 2-5 % (tren superior) o 5-10 % (tren inferior) y vuelve al rango bajo.',
       deload: 'Cada 4-6 semanas, o cuando el rendimiento caiga 2 sesiones seguidas, reduce el volumen a la mitad durante una semana manteniendo la carga.',
@@ -399,6 +410,9 @@
     const sex = src.sex === 'F' ? 'F' : 'M';
     let division = src.division;
     if (!K.DIVISIONS[division] || K.DIVISIONS[division].sex !== sex) division = sex === 'M' ? 'general_m' : 'general_w';
+    const validMuscles = Object.keys(K.EXERCISES);
+    const laggingRaw = Array.isArray(src.laggingMuscles) ? src.laggingMuscles : (src.laggingMuscles ? [src.laggingMuscles] : []);
+    const laggingMuscles = unique(laggingRaw.filter(m => validMuscles.includes(m)));
     return {
       name: (src.name || 'Perfil').toString().trim(),
       sex, age: n(src.age), heightCm: n(src.heightCm), weightKg: n(src.weightKg),
@@ -408,6 +422,7 @@
       daysPerWeek: n(src.daysPerWeek) || 4,
       division, goal: ['cut', 'bulk', 'maintain'].includes(src.goal) ? src.goal : 'cut',
       targetDate: src.targetDate || '', targetBf: n(src.targetBf), classicLimitLb: n(src.classicLimitLb),
+      laggingMuscles,
     };
   }
 

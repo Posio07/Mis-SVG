@@ -200,6 +200,9 @@
           </select>
           <label>Días de entrenamiento por semana *</label>
           <select name="daysPerWeek">${[3, 4, 5, 6].map(n => `<option value="${n}" ${Number(d.daysPerWeek) === n ? 'selected' : ''}>${n} días</option>`).join('')}</select>
+          <label>Grupos musculares rezagados (opcional)</label>
+          <p class="help">Reciben un 25 % más de series que el resto, por encima incluso del recorte que les tocaría por tu división.</p>
+          <div class="row3">${Object.entries(KNOWLEDGE.MUSCLE_LABELS).map(([id, label]) => `<label style="display:flex;align-items:center;gap:.4rem;margin:.2rem 0;font-size:.85rem;color:var(--fg)"><input type="checkbox" name="laggingMuscles" value="${id}" style="width:auto" ${(d.laggingMuscles || []).includes(id) ? 'checked' : ''}> ${esc(label)}</label>`).join('')}</div>
         </fieldset>
         <fieldset>
           <legend>Objetivo</legend>
@@ -247,7 +250,9 @@
 
     form.onsubmit = e => {
       e.preventDefault();
-      const data = Object.fromEntries(new FormData(form).entries());
+      const fd = new FormData(form);
+      const data = Object.fromEntries(fd.entries());
+      data.laggingMuscles = fd.getAll('laggingMuscles');
       const errors = ENGINE.validateProfile(data);
       if (errors.length) { $('#form-errors').innerHTML = errors.map(x => `<div class="alert danger">${esc(x)}</div>`).join(''); window.scrollTo({ top: document.body.scrollHeight }); return; }
       const norm = ENGINE.normalizeProfile(data);
@@ -375,7 +380,7 @@
 
   function htmlTraining(plan) {
     const tr = plan.training, t = plan.targets;
-    const setsRows = Object.entries(tr.weeklySets).map(([mu, s]) => `<tr><td>${esc(KNOWLEDGE.MUSCLE_LABELS[mu])}</td><td class="num">${s}</td></tr>`).join('');
+    const setsRows = Object.entries(tr.weeklySets).map(([mu, s]) => `<tr><td>${esc(KNOWLEDGE.MUSCLE_LABELS[mu])}${tr.laggingApplied[mu] ? ' <span class="cite" title="Grupo rezagado: +25 % de series, anula el énfasis de la división">rezagado</span>' : ''}</td><td class="num">${s}</td></tr>`).join('');
     return `
       <div class="card accent">
         <h2>Entrenamiento · ${esc(tr.splitName)}</h2>

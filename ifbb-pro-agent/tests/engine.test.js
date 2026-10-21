@@ -107,6 +107,27 @@ test('validateProfile catches missing data', () => {
   assert.deepEqual(E.validateProfile(male), []);
 });
 
+test('DEC-001: grupos rezagados anulan el énfasis de división y suben el volumen', () => {
+  const base = Object.assign({}, male, { division: 'physique_m', goal: 'cut' });
+  const withoutLagging = E.buildPlan(base, TODAY).training.weeklySets;
+  assert.equal(withoutLagging.quads, 6); // 14*0.85*0.5 (énfasis "down" de physique_m) = 5.95 -> 6
+  const withLagging = E.buildPlan(Object.assign({}, base, { laggingMuscles: ['quads', 'hamstrings', 'glutes'] }), TODAY).training.weeklySets;
+  assert.equal(withLagging.quads, 15); // 14*0.85*1.25 = 14.875 -> 15
+  assert.equal(withLagging.hamstrings, 15);
+  assert.equal(withLagging.glutes, 15);
+  assert.equal(withLagging.chest, withoutLagging.chest, 'músculos no rezagados no deberían cambiar');
+});
+
+test('DEC-001: tope de 20 series/semana para un grupo rezagado', () => {
+  const plan = E.buildPlan(Object.assign({}, male, { level: 'advanced', goal: 'bulk', laggingMuscles: ['chest'] }), TODAY);
+  assert.ok(plan.training.weeklySets.chest <= 20);
+});
+
+test('DEC-001: entradas inválidas en laggingMuscles se ignoran', () => {
+  const p = E.normalizeProfile(Object.assign({}, male, { laggingMuscles: ['quads', 'no-existe', 'quads'] }));
+  assert.deepEqual(p.laggingMuscles, ['quads']);
+});
+
 test('every source referenced by plan exists in knowledge base', () => {
   const plan = E.buildPlan(male, TODAY);
   plan.sourcesUsed.forEach(id => assert.ok(K.SOURCES[id], `missing source ${id}`));

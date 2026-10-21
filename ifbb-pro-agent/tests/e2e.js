@@ -62,8 +62,9 @@ const server = http.createServer((req, res) => {
 
   // Progreso
   await page.click('.tab[data-tab=progress]');
+  const future = new Date(); future.setDate(future.getDate() + 7);
   await page.fill('#log-form input[name=weightKg]', '83.2');
-  await page.fill('#log-form input[name=date]', '2026-09-22');
+  await page.fill('#log-form input[name=date]', future.toISOString().slice(0, 10));
   await page.click('#log-form button[type=submit]');
   await page.waitForSelector('#btn-apply');
   const rows = await page.$$eval('table tr', r => r.length);
