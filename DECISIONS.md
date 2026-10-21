@@ -37,7 +37,7 @@ Este archivo es la fuente de verdad de la lógica de negocio. Antes de cambiar c
 - Respaldo: [Evidencia] Hodgdon & Beckett 1984 (error ±3-4%). Umbral: [Criterio].
 - Test: diferencia de 5 puntos → aviso; diferencia de 2 → sin aviso.
 
-**Estado: pendiente.**
+**Estado: implementada.**
 
 ## DEC-005 · Objetivo "salud/funcional"
 - Bandera nueva en el perfil, desactivada por defecto.

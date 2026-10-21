@@ -67,8 +67,16 @@
     const bmi = p.weightKg / (h * h);
 
     let bodyFat = null, bfMethod = null;
-    if (p.bodyFatPct > 0) { bodyFat = p.bodyFatPct; bfMethod = 'medido (DXA, plicometría, BIA…)'; }
-    else {
+    if (p.bodyFatPct > 0) {
+      bodyFat = p.bodyFatPct; bfMethod = 'medido (DXA, plicometría, BIA…)';
+      // DEC-004: si además hay circunferencias, se contrasta con el método
+      // Navy (error típico ±3-4 %, Hodgdon & Beckett 1984). Una diferencia
+      // grande (umbral de criterio de la app) sugiere un dato mal tomado.
+      const navyCheck = bodyFatNavy(p.sex, p.heightCm, p.neckCm, p.waistCm, p.hipCm);
+      if (navyCheck != null && Math.abs(navyCheck - bodyFat) > 4) {
+        warnings.push({ level: 'warn', text: `El % de grasa indicado (${round(bodyFat, 1)} %) y el estimado por circunferencias (${round(navyCheck, 1)} %) difieren en más de 4 puntos. Revisa las medidas: se usa el valor indicado (${round(bodyFat, 1)} %) para el resto del plan.` });
+      }
+    } else {
       const navy = bodyFatNavy(p.sex, p.heightCm, p.neckCm, p.waistCm, p.hipCm);
       if (navy != null) { bodyFat = navy; bfMethod = 'estimado por circunferencias (Navy ±3-4 %)'; }
     }
