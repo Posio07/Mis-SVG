@@ -304,7 +304,7 @@
     quads: [
       { name: 'Sentadilla trasera o sentadilla en hack', type: 'compound', reps: [6, 10] },
       { name: 'Prensa de piernas', type: 'compound', reps: [8, 12] },
-      { name: 'Zancadas o sentadilla búlgara', type: 'compound', reps: [8, 12] },
+      { name: 'Zancadas o sentadilla búlgara', type: 'compound', reps: [8, 12], unilateral: true },
       { name: 'Extensión de cuádriceps', type: 'isolation', reps: [10, 15] },
     ],
     hamstrings: [
@@ -313,9 +313,9 @@
     ],
     glutes: [
       { name: 'Hip thrust con barra', type: 'compound', reps: [6, 10] },
-      { name: 'Sentadilla búlgara con énfasis en cadera', type: 'compound', reps: [8, 12] },
+      { name: 'Sentadilla búlgara con énfasis en cadera', type: 'compound', reps: [8, 12], unilateral: true },
       { name: 'Abducción de cadera en máquina', type: 'isolation', reps: [12, 15] },
-      { name: 'Patada de glúteo en polea', type: 'isolation', reps: [12, 15] },
+      { name: 'Patada de glúteo en polea', type: 'isolation', reps: [12, 15], unilateral: true },
     ],
     calves: [
       { name: 'Elevación de talones de pie', type: 'isolation', reps: [8, 12] },
@@ -341,8 +341,8 @@
    * respaldo específico en la literatura citada). */
   const FUNCTIONAL_EXERCISES = {
     quads: [
-      { name: 'Sentadilla búlgara con mancuernas', type: 'compound', reps: [8, 12] },
-      { name: 'Step-up con carga', type: 'compound', reps: [8, 12] },
+      { name: 'Sentadilla búlgara con mancuernas', type: 'compound', reps: [8, 12], unilateral: true },
+      { name: 'Step-up con carga', type: 'compound', reps: [8, 12], unilateral: true },
       { name: 'Paseo del granjero', type: 'compound', reps: [20, 40] },
     ],
   };

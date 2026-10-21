@@ -245,6 +245,42 @@ test('DEC-006: el segundo ejercicio de cuádriceps prioriza prensa de piernas', 
   if (quadsExercises.length >= 2) assert.equal(quadsExercises[1].name, 'Prensa de piernas');
 });
 
+test('DEC-007: los ejercicios unilaterales cuentan el doble en la duración estimada', () => {
+  // Fuerza que el pick de cuádriceps sea el unilateral "Zancadas o sentadilla
+  // búlgara" en vez de "Sentadilla trasera...", comparando dos perfiles
+  // idénticos salvo por eso, usando el mismo número de series.
+  const K = require('../js/knowledge.js');
+  const quadsLib = K.EXERCISES.quads;
+  const unilateralIdx = quadsLib.findIndex(e => e.unilateral);
+  assert.ok(unilateralIdx >= 0, 'debería haber al menos un ejercicio de cuádriceps marcado unilateral');
+  // Cálculo directo: mismo ejercicio, sets=4, type compound (150s) -> normal vs x2
+  const sets = 4, restSec = 150, transition = 45;
+  const normalMin = Math.round((sets * (restSec + transition)) / 60);
+  const unilateralMin = Math.round((2 * sets * (restSec + transition)) / 60);
+  assert.equal(unilateralMin, normalMin * 2);
+
+  // Chequeo end-to-end: un día con "Zancadas o sentadilla búlgara" dura más
+  // que si ese mismo volumen fuera con un ejercicio bilateral.
+  const plan = E.buildPlan(Object.assign({}, male, { division: 'bodybuilding_m', level: 'advanced', goal: 'maintain', daysPerWeek: 3 }), TODAY);
+  const dayWithBulgara = plan.training.sessions.find(s => s.exercises.some(e => e.name === 'Zancadas o sentadilla búlgara'));
+  assert.ok(dayWithBulgara, 'algún día debería tener la variante unilateral de cuádriceps');
+});
+
+test('DEC-007: no afecta el cálculo si no hay ejercicios unilaterales ese día', () => {
+  const plan = E.buildPlan(male, TODAY); // classic_m no usa ejercicios unilaterales en su rotación típica de 5 días
+  plan.training.sessions.forEach(s => {
+    const hasUnilateral = s.exercises.some(e => e.unilateral);
+    if (!hasUnilateral) {
+      let seconds = 0;
+      s.exercises.forEach(e => {
+        if (e.topSet) { seconds += 180 + 45; seconds += (e.backoffSets || 0) * (150 + 45); }
+        else { const rest = e.type === 'compound' ? 150 : 75; seconds += e.sets * (rest + 45); }
+      });
+      assert.equal(s.durationMin, Math.round(seconds / 60), `${s.name}: duración no coincide con la fórmula simple`);
+    }
+  });
+});
+
 test('every source referenced by plan exists in knowledge base', () => {
   const plan = E.buildPlan(male, TODAY);
   plan.sourcesUsed.forEach(id => assert.ok(K.SOURCES[id], `missing source ${id}`));

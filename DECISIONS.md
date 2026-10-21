@@ -42,7 +42,7 @@ Este archivo es la fuente de verdad de la lógica de negocio. Antes de cambiar c
 - Respaldo: [Criterio].
 - Test: perfil Emanuel → los días de pierna no tienen abdomen ni pantorrillas si existe un día de empuje o tirón con menos series; un día con 26 series muestra el aviso.
 
-**Estado: implementada (duración sin doblar unilaterales todavía: eso llega con DEC-007).**
+**Estado: implementada.**
 
 ## DEC-006 · Sin patrones duplicados por sesión
 - Un mismo ejercicio base (incluidas sus variantes, por ejemplo "búlgara" y "búlgara con énfasis en cadera") aparece como máximo una vez por sesión. Puede repetirse en días distintos.
@@ -55,7 +55,7 @@ Este archivo es la fuente de verdad de la lógica de negocio. Antes de cambiar c
 - En la duración estimada, los ejercicios unilaterales cuentan doble.
 - Respaldo: [Criterio].
 
-**Estado: pendiente.**
+**Estado: implementada.**
 
 ## DEC-004 · Aviso de inconsistencia en % de grasa
 - Si hay % de grasa ingresado Y circunferencias, calcular también el % por fórmula Navy. Si la diferencia es mayor a 4 puntos, mostrar un aviso no bloqueante con ambos valores.

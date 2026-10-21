@@ -455,7 +455,7 @@
         let rest = sets - per * picks.length;
         picks.forEach(ex => {
           const n = per + (rest-- > 0 ? 1 : 0);
-          exercises.push({ muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: ex.name, type: ex.type, sets: n, reps: `${ex.reps[0]}-${ex.reps[1]}`, rir: ex.type === 'compound' ? '2-3' : '1-2', rest: ex.type === 'compound' ? '2-3 min' : '60-90 s' });
+          exercises.push({ muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: ex.name, type: ex.type, unilateral: !!ex.unilateral, sets: n, reps: `${ex.reps[0]}-${ex.reps[1]}`, rir: ex.type === 'compound' ? '2-3' : '1-2', rest: ex.type === 'compound' ? '2-3 min' : '60-90 s' });
         });
       });
       return { name: d.name, exercises, totalSets: exercises.reduce((a, e) => a + e.sets, 0) };
@@ -495,7 +495,7 @@
         let rest = sets - per * picks.length;
         picks.forEach(ex => {
           const n = per + (rest-- > 0 ? 1 : 0);
-          s.exercises.push({ muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: ex.name, type: ex.type, sets: n, reps: `${ex.reps[0]}-${ex.reps[1]}`, rir: ex.type === 'compound' ? '2-3' : '1-2', rest: ex.type === 'compound' ? '2-3 min' : '60-90 s' });
+          s.exercises.push({ muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: ex.name, type: ex.type, unilateral: !!ex.unilateral, sets: n, reps: `${ex.reps[0]}-${ex.reps[1]}`, rir: ex.type === 'compound' ? '2-3' : '1-2', rest: ex.type === 'compound' ? '2-3 min' : '60-90 s' });
           s.totalSets += n;
         });
       });
@@ -526,17 +526,20 @@
       });
     }
 
-    // DEC-003 v2: duración estimada por día = series × (descanso medio + 45 s
-    // de transición/ejecución), redondeada a minutos (criterio de la app).
+    // DEC-003 v2 / DEC-007: duración estimada por día = series × (descanso
+    // medio + 45 s de transición/ejecución), redondeada a minutos (criterio
+    // de la app). Los ejercicios unilaterales cuentan doble (se hace cada
+    // lado por separado, así que ocupan el doble de tiempo real).
     sessions.forEach(s => {
       let seconds = 0;
       s.exercises.forEach(e => {
+        const unilateralFactor = e.unilateral ? 2 : 1;
         if (e.topSet) {
-          seconds += 1 * (180 + 45);
-          seconds += (e.backoffSets || 0) * (150 + 45);
+          seconds += unilateralFactor * (1 * (180 + 45));
+          seconds += unilateralFactor * ((e.backoffSets || 0) * (150 + 45));
         } else {
           const rest = e.type === 'compound' ? 150 : 75;
-          seconds += e.sets * (rest + 45);
+          seconds += unilateralFactor * (e.sets * (rest + 45));
         }
       });
       s.durationMin = Math.round(seconds / 60);
