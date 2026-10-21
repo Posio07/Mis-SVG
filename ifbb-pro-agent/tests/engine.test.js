@@ -300,6 +300,27 @@ test('DEC-006 (corregido): el patrón viene del catálogo, no del texto del nomb
   assert.notEqual(K.EXERCISES.chest[2].pattern, K.EXERCISES.triceps[0].pattern); // "fondos" ya no choca
 });
 
+test('DEC-005 (aclarado): con la bandera activa, el funcional se suma después del principal, no lo reemplaza', () => {
+  const emanuel = {
+    name: 'Emanuel', sex: 'M', age: 28, heightCm: 175, weightKg: 78, bodyFatPct: 14,
+    activity: 'moderate', level: 'intermediate', daysPerWeek: 5, division: 'physique_m', goal: 'cut',
+    laggingMuscles: ['quads', 'hamstrings', 'glutes'], healthGoal: true,
+  };
+  const plan = E.buildPlan(emanuel, TODAY);
+  const dia2 = plan.training.sessions.find(s => s.name.includes('Pierna') && s.exercises.some(e => e.muscle === 'quads'));
+  const quadsNames = dia2.exercises.filter(e => e.muscle === 'quads').map(e => e.name);
+  const idxSquat = quadsNames.indexOf('Sentadilla trasera o sentadilla en hack');
+  const idxBulgara = quadsNames.indexOf('Sentadilla búlgara con mancuernas');
+  assert.ok(idxSquat !== -1, 'debería seguir estando la sentadilla trasera/hack');
+  assert.ok(idxBulgara !== -1, 'debería aparecer la búlgara funcional');
+  assert.ok(idxBulgara > idxSquat, 'la búlgara debe ir después del ejercicio principal');
+  // el volumen semanal de cuádriceps no cambia por activar la bandera
+  const withoutFlag = E.buildPlan(Object.assign({}, emanuel, { healthGoal: false }), TODAY);
+  assert.equal(plan.training.weeklySets.quads, withoutFlag.training.weeklySets.quads);
+  const assignedWith = plan.training.sessions.filter(s => s.exercises.some(e => e.muscle === 'quads')).reduce((a, s) => a + s.exercises.filter(e => e.muscle === 'quads').reduce((b, e) => b + e.sets, 0), 0);
+  assert.equal(assignedWith, plan.training.weeklySets.quads, 'el total asignado de cuádriceps no debería cambiar por sumar el funcional');
+});
+
 test('every source referenced by plan exists in knowledge base', () => {
   const plan = E.buildPlan(male, TODAY);
   plan.sourcesUsed.forEach(id => assert.ok(K.SOURCES[id], `missing source ${id}`));

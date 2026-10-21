@@ -419,16 +419,6 @@
         const idx = rotate[mu] = (rotate[mu] || 0);
         let picks = sets <= 4 ? [lib[idx % lib.length]] : [lib[idx % lib.length], lib[(idx + 1) % lib.length]];
         rotate[mu] = idx + picks.length;
-        if (extra.length) {
-          // Si hay extras activos (DEC-005), uno de los huecos de la sesión
-          // los usa en rotación propia, para que de verdad entren al plan y
-          // no queden solo como entradas al final de una lista que nunca se
-          // recorre tan lejos. Va en el primer hueco: el segundo de
-          // cuádriceps lo reserva DEC-006 para la prensa.
-          const ridx = rotateExtra[mu] = (rotateExtra[mu] || 0);
-          rotateExtra[mu] = ridx + 1;
-          picks = picks.slice(); picks[0] = extra[ridx % extra.length];
-        }
         if (mu === 'quads' && picks.length === 2) {
           // DEC-006: el segundo ejercicio de cuádriceps prioriza prensa.
           const prensa = lib.find(e => e.name === 'Prensa de piernas');
@@ -438,10 +428,31 @@
         picks = dedupPicks(picks, lib, exercises);
         const per = Math.floor(sets / picks.length);
         let rest = sets - per * picks.length;
-        picks.forEach(ex => {
+        const dayEntries = picks.map(ex => {
           const n = per + (rest-- > 0 ? 1 : 0);
-          exercises.push({ muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: ex.name, type: ex.type, pattern: ex.pattern || ex.name, unilateral: !!ex.unilateral, sets: n, reps: `${ex.reps[0]}-${ex.reps[1]}`, rir: ex.type === 'compound' ? '2-3' : '1-2', rest: ex.type === 'compound' ? '2-3 min' : '60-90 s' });
+          return { muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: ex.name, type: ex.type, pattern: ex.pattern || ex.name, unilateral: !!ex.unilateral, sets: n, reps: `${ex.reps[0]}-${ex.reps[1]}`, rir: ex.type === 'compound' ? '2-3' : '1-2', rest: ex.type === 'compound' ? '2-3 min' : '60-90 s' };
         });
+        dayEntries.forEach(e => exercises.push(e));
+        // DEC-005 (aclarado): con la bandera activa, el ejercicio funcional
+        // se SUMA después de los principales; nunca reemplaza el patrón
+        // bilateral pesado del día. Se financia quitándole series a un
+        // aislamiento del mismo grupo ese día (o, si no hay, al último
+        // ejercicio puesto), sin bajarlo de un piso de 2 series, para no
+        // tocar el volumen semanal de DEC-001.
+        if (extra.length) {
+          const ridx = rotateExtra[mu] = (rotateExtra[mu] || 0);
+          rotateExtra[mu] = ridx + 1;
+          const bonus = extra[ridx % extra.length];
+          const BONUS_SETS = 2;
+          const bonusPattern = bonus.pattern || bonus.name;
+          const alreadyThere = exercises.some(e => (e.pattern || e.name) === bonusPattern);
+          const donor = dayEntries.find(e => e.type === 'isolation') || dayEntries[dayEntries.length - 1];
+          if (!alreadyThere && donor && donor.sets - BONUS_SETS >= 2) {
+            donor.sets -= BONUS_SETS;
+            exercises.push({ muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: bonus.name, type: bonus.type, pattern: bonusPattern, unilateral: !!bonus.unilateral, sets: BONUS_SETS, reps: `${bonus.reps[0]}-${bonus.reps[1]}`, rir: bonus.type === 'compound' ? '2-3' : '1-2', rest: bonus.type === 'compound' ? '2-3 min' : '60-90 s' });
+          }
+          // si no hay de dónde financiarlo ese día sin romper el piso, no se agrega esta vez
+        }
       });
       return { name: d.name, exercises, totalSets: exercises.reduce((a, e) => a + e.sets, 0) };
     });
