@@ -49,7 +49,7 @@ Este archivo es la fuente de verdad de la lógica de negocio. Antes de cambiar c
 - Para el segundo ejercicio de cuádriceps, priorizar prensa.
 - Respaldo: [Criterio].
 
-**Estado: implementada.**
+**Estado: implementada.** Corrección posterior: la primera versión agrupaba por texto del nombre (regex), lo que en un caso real hizo que la sentadilla trasera desapareciera del Día 2 de un perfil y quedara reemplazada por la búlgara. Ahora cada ejercicio del catálogo (`knowledge.js`) lleva un id de patrón explícito (`pattern`, p. ej. `squat_bilateral` vs `split_squat`); la comparación de duplicados usa ese id, no el nombre. Las dos búlgaras (cuádriceps y glúteos) y la búlgara funcional comparten a propósito el id `split_squat`.
 
 ## DEC-007 · Tiempo de unilaterales
 - En la duración estimada, los ejercicios unilaterales cuentan doble.

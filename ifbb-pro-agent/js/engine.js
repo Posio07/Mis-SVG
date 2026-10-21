@@ -326,48 +326,33 @@
     triceps: cat => ['torso', 'push', 'full'].includes(cat),
   };
 
-  // DEC-006: identifica la "familia" de un ejercicio para no repetir el mismo
-  // patrón (variantes incluidas, p. ej. las dos búlgaras) en una sesión.
-  // Orden importa: los patrones más específicos van antes que los genéricos.
-  const PATTERN_RULES = [
-    [/búlgara/i, 'bulgara'], [/step-up/i, 'step-up'], [/zancada/i, 'zancada'],
-    [/paseo del granjero/i, 'granjero'], [/sentadilla/i, 'sentadilla'],
-    [/peso muerto/i, 'peso-muerto'], [/press banca|press inclinado/i, 'press-pecho'],
-    [/dominadas|jalón al pecho/i, 'jalon-dorsal'], [/remo/i, 'remo'], [/pullover/i, 'pullover'],
-    [/curl femoral/i, 'curl-femoral'], [/extensión de cuádriceps/i, 'extension-cuadriceps'],
-    [/prensa de piernas/i, 'prensa'], [/hip thrust/i, 'hip-thrust'],
-    [/abducción de cadera/i, 'abduccion-cadera'], [/patada de glúteo/i, 'patada-gluteo'],
-    [/elevaciones laterales/i, 'lateral'], [/face pull|pájaros/i, 'face-pull'],
-    [/press militar/i, 'press-militar'], [/aperturas|pec-deck/i, 'apertura-pecho'],
-    [/fondos en paralelas/i, 'fondos-pecho'], [/press cerrado/i, 'press-cerrado-triceps'],
-    [/extensión de tríceps/i, 'extension-triceps'],
-    [/curl (con barra|inclinado)/i, 'curl-biceps'], [/elevación de talones/i, 'gemelo'],
-    [/crunch|rueda abdominal/i, 'abdominal-flexion'], [/elevaciones de piernas/i, 'abdominal-piernas'],
-    [/vacuum/i, 'vacuum'],
-  ];
-  function basePattern(name) {
-    for (const [re, key] of PATTERN_RULES) if (re.test(name)) return key;
-    return name; // sin regla: el propio nombre es su patrón (no choca con nada más)
+  // DEC-006 (corregido): la "familia" de un ejercicio es su id de patrón
+  // explícito del catálogo (knowledge.js), no el texto de su nombre. Antes
+  // se agrupaba por palabras del nombre y eso mezclaba por error ejercicios
+  // distintos que compartían una palabra (p. ej. "fondos" aparecía tanto en
+  // un ejercicio de pecho como en uno de tríceps).
+  function basePattern(ex) {
+    return ex && ex.pattern ? ex.pattern : (ex && ex.name); // sin id: el propio nombre es su patrón
   }
   // Si el candidato ya se usó ese día, busca en la misma lista la siguiente
   // opción que no choque. Si todas chocan, se permite el duplicado (no hay
   // alternativa real para ese músculo ese día).
   function resolvePick(candidate, lib, usedPatterns) {
-    if (!usedPatterns.has(basePattern(candidate.name))) return candidate;
+    if (!usedPatterns.has(basePattern(candidate))) return candidate;
     const startIdx = lib.indexOf(candidate);
     for (let step = 1; step <= lib.length; step++) {
       const alt = lib[(startIdx + step) % lib.length];
-      if (!usedPatterns.has(basePattern(alt.name))) return alt;
+      if (!usedPatterns.has(basePattern(alt))) return alt;
     }
     return candidate;
   }
   // Resuelve colisiones dentro de un mismo conjunto de picks para un día,
   // en orden, y deja el set de patrones usados actualizado.
   function dedupPicks(picks, lib, dayExercises) {
-    const used = new Set(dayExercises.map(e => basePattern(e.name)));
+    const used = new Set(dayExercises.map(e => e.pattern || e.name));
     return picks.map(ex => {
       const resolved = resolvePick(ex, lib, used);
-      used.add(basePattern(resolved.name));
+      used.add(basePattern(resolved));
       return resolved;
     });
   }
@@ -455,7 +440,7 @@
         let rest = sets - per * picks.length;
         picks.forEach(ex => {
           const n = per + (rest-- > 0 ? 1 : 0);
-          exercises.push({ muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: ex.name, type: ex.type, unilateral: !!ex.unilateral, sets: n, reps: `${ex.reps[0]}-${ex.reps[1]}`, rir: ex.type === 'compound' ? '2-3' : '1-2', rest: ex.type === 'compound' ? '2-3 min' : '60-90 s' });
+          exercises.push({ muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: ex.name, type: ex.type, pattern: ex.pattern || ex.name, unilateral: !!ex.unilateral, sets: n, reps: `${ex.reps[0]}-${ex.reps[1]}`, rir: ex.type === 'compound' ? '2-3' : '1-2', rest: ex.type === 'compound' ? '2-3 min' : '60-90 s' });
         });
       });
       return { name: d.name, exercises, totalSets: exercises.reduce((a, e) => a + e.sets, 0) };
@@ -495,7 +480,7 @@
         let rest = sets - per * picks.length;
         picks.forEach(ex => {
           const n = per + (rest-- > 0 ? 1 : 0);
-          s.exercises.push({ muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: ex.name, type: ex.type, unilateral: !!ex.unilateral, sets: n, reps: `${ex.reps[0]}-${ex.reps[1]}`, rir: ex.type === 'compound' ? '2-3' : '1-2', rest: ex.type === 'compound' ? '2-3 min' : '60-90 s' });
+          s.exercises.push({ muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: ex.name, type: ex.type, pattern: ex.pattern || ex.name, unilateral: !!ex.unilateral, sets: n, reps: `${ex.reps[0]}-${ex.reps[1]}`, rir: ex.type === 'compound' ? '2-3' : '1-2', rest: ex.type === 'compound' ? '2-3 min' : '60-90 s' });
           s.totalSets += n;
         });
       });
