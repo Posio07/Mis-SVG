@@ -128,6 +128,21 @@ test('DEC-001: entradas inválidas en laggingMuscles se ignoran', () => {
   assert.deepEqual(p.laggingMuscles, ['quads']);
 });
 
+test('DEC-002: top set solo en definición, no cambia el total de series', () => {
+  const cut = E.buildPlan(male, TODAY).training;
+  const firstCompoundHasTopSet = cut.sessions.every(s => {
+    const idx = s.exercises.findIndex(e => e.type === 'compound');
+    return idx === -1 || s.exercises[idx].topSet;
+  });
+  assert.ok(firstCompoundHasTopSet, 'todas las sesiones de definición deberían tener top set en su primer multiarticular');
+  assert.ok(cut.sessions.some(s => s.exercises.some(e => e.topSet)), 'al menos una sesión debe mostrar un top set');
+
+  const maintain = E.buildPlan(Object.assign({}, male, { goal: 'maintain' }), TODAY).training;
+  assert.ok(maintain.sessions.every(s => s.exercises.every(e => !e.topSet)), 'en mantenimiento no debería aparecer top set');
+  const bulk = E.buildPlan(Object.assign({}, male, { goal: 'bulk' }), TODAY).training;
+  assert.ok(bulk.sessions.every(s => s.exercises.every(e => !e.topSet)), 'en volumen no debería aparecer top set');
+});
+
 test('every source referenced by plan exists in knowledge base', () => {
   const plan = E.buildPlan(male, TODAY);
   plan.sourcesUsed.forEach(id => assert.ok(K.SOURCES[id], `missing source ${id}`));

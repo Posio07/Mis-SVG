@@ -21,7 +21,7 @@ Este archivo es la fuente de verdad de la lógica de negocio. Antes de cambiar c
 - Respaldo: [Evidencia] Helms et al. 2015; [Posicionamiento] ACSM 2009.
 - Test: en definición aparece el top set; en volumen/mantenimiento no.
 
-**Estado: pendiente.**
+**Estado: implementada.**
 
 ## DEC-003 · Tope por sesión
 - Parámetro configurable: máximo de series por sesión (default 25).

@@ -394,7 +394,7 @@
         <div class="src">Fuentes: ${cite(tr.sources)}</div>
       </div>
       ${tr.sessions.map(s => `<div class="session"><h4>${esc(s.name)} <small>${s.totalSets} series</small></h4>
-        ${s.exercises.map(e => `<div class="ex"><div><div class="n">${esc(e.name)}</div><div class="m">${esc(e.muscleLabel)} · RIR ${e.rir} · descanso ${e.rest}</div></div><div class="s">${e.sets} × ${e.reps}</div></div>`).join('')}
+        ${s.exercises.map(e => e.topSet ? `<div class="ex"><div><div class="n">${esc(e.name)} <span class="cite" title="Serie pesada previa al back-off, Helms et al. 2015 / ACSM 2009">Top set</span></div><div class="m">${esc(e.muscleLabel)} · RIR ${e.topSet.rir} · descanso 3 min</div></div><div class="s">1 × ${e.topSet.reps}</div></div>${e.backoffSets > 0 ? `<div class="ex"><div><div class="n">${esc(e.name)} · back-off (−10 % carga)</div><div class="m">${esc(e.muscleLabel)} · RIR ${e.rir} · descanso ${e.rest}</div></div><div class="s">${e.backoffSets} × ${e.reps}</div></div>` : ''}` : `<div class="ex"><div><div class="n">${esc(e.name)}</div><div class="m">${esc(e.muscleLabel)} · RIR ${e.rir} · descanso ${e.rest}</div></div><div class="s">${e.sets} × ${e.reps}</div></div>`).join('')}
       </div>`).join('')}
       <div class="card">
         <h3>Cardio</h3>

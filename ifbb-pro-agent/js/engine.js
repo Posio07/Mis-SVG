@@ -366,11 +366,27 @@
         let rest = sets - per * picks.length;
         picks.forEach(ex => {
           const n = per + (rest-- > 0 ? 1 : 0);
-          exercises.push({ muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: ex.name, sets: n, reps: `${ex.reps[0]}-${ex.reps[1]}`, rir: ex.type === 'compound' ? '2-3' : '1-2', rest: ex.type === 'compound' ? '2-3 min' : '60-90 s' });
+          exercises.push({ muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: ex.name, type: ex.type, sets: n, reps: `${ex.reps[0]}-${ex.reps[1]}`, rir: ex.type === 'compound' ? '2-3' : '1-2', rest: ex.type === 'compound' ? '2-3 min' : '60-90 s' });
         });
       });
       return { name: d.name, exercises, totalSets: exercises.reduce((a, e) => a + e.sets, 0) };
     });
+
+    // DEC-002: en definición, el primer multiarticular de cada día lleva un
+    // top set pesado (no suma series nuevas: la primera de sus series pasa a
+    // ser el top set y el resto queda como back-off al -10% de carga).
+    if (p.goal === 'cut') {
+      sessions.forEach(s => {
+        const idx = s.exercises.findIndex(e => e.type === 'compound');
+        if (idx === -1) return;
+        const ex = s.exercises[idx];
+        s.exercises[idx] = Object.assign({}, ex, {
+          topSet: { reps: '4-6', rir: '1-2' },
+          backoffSets: Math.max(0, ex.sets - 1),
+          backoffPct: -10,
+        });
+      });
+    }
 
     const cardio = p.goal === 'cut'
       ? { sessions: p.level === 'advanced' ? 3 : 2, minutes: 25, type: 'LISS (caminata inclinada, bici, elíptica) al 60-70 % FC máx.; opcional 1 sesión HIIT de 10-15 min', rule: 'La mínima cantidad necesaria para mantener el ritmo de pérdida; añade 10 min/sesión solo si el peso se estanca 2 semanas. Sepáralo del entrenamiento de fuerza o hazlo después.' }
