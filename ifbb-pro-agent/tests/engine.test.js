@@ -128,13 +128,17 @@ test('DEC-001: entradas inválidas en laggingMuscles se ignoran', () => {
   assert.deepEqual(p.laggingMuscles, ['quads']);
 });
 
-test('DEC-002: top set solo en definición, no cambia el total de series', () => {
+test('DEC-002/DEC-008: top set solo en definición, en el primer ejercicio ELEGIBLE del día (no cualquier multiarticular)', () => {
   const cut = E.buildPlan(male, TODAY).training;
-  const firstCompoundHasTopSet = cut.sessions.every(s => {
-    const idx = s.exercises.findIndex(e => e.type === 'compound');
-    return idx === -1 || s.exercises[idx].topSet;
+  // Con DEC-008, un día puede no tener top set si ningún ejercicio es
+  // elegible ese día (nunca unilaterales ni máquinas); lo que sí vale
+  // siempre es que, si hay top set, cae en un ejercicio elegible y es
+  // el primero de la sesión.
+  cut.sessions.forEach(s => {
+    const idx = s.exercises.findIndex(e => e.topSet);
+    if (idx === -1) return;
+    assert.equal(idx, 0, `${s.name}: el top set debería quedar como el primer ejercicio`);
   });
-  assert.ok(firstCompoundHasTopSet, 'todas las sesiones de definición deberían tener top set en su primer multiarticular');
   assert.ok(cut.sessions.some(s => s.exercises.some(e => e.topSet)), 'al menos una sesión debe mostrar un top set');
 
   const maintain = E.buildPlan(Object.assign({}, male, { goal: 'maintain' }), TODAY).training;
@@ -319,6 +323,39 @@ test('DEC-005 (aclarado): con la bandera activa, el funcional se suma después d
   assert.equal(plan.training.weeklySets.quads, withoutFlag.training.weeklySets.quads);
   const assignedWith = plan.training.sessions.filter(s => s.exercises.some(e => e.muscle === 'quads')).reduce((a, s) => a + s.exercises.filter(e => e.muscle === 'quads').reduce((b, e) => b + e.sets, 0), 0);
   assert.equal(assignedWith, plan.training.weeklySets.quads, 'el total asignado de cuádriceps no debería cambiar por sumar el funcional');
+});
+
+test('DEC-008: ningún top set cae en búlgara ni en press en máquina/fondos; el Día 2 de Emanuel abre con sentadilla trasera/hack', () => {
+  const emanuel = {
+    name: 'Emanuel', sex: 'M', age: 28, heightCm: 175, weightKg: 78, bodyFatPct: 14,
+    activity: 'moderate', level: 'intermediate', daysPerWeek: 5, division: 'physique_m', goal: 'cut',
+    laggingMuscles: ['quads', 'hamstrings', 'glutes'],
+  };
+  const plan = E.buildPlan(emanuel, TODAY);
+  const INELIGIBLE_PATTERNS = ['split_squat', 'chest_dip_or_machine', 'leg_press', 'step_up', 'row_cable'];
+  plan.training.sessions.forEach(s => {
+    const topEx = s.exercises.find(e => e.topSet);
+    if (!topEx) return;
+    assert.ok(!INELIGIBLE_PATTERNS.includes(topEx.pattern), `${s.name}: top set en patrón no elegible (${topEx.pattern})`);
+    assert.ok(!topEx.unilateral, `${s.name}: top set en ejercicio unilateral`);
+  });
+  const dia2 = plan.training.sessions.find(s => s.name.includes('Pierna') && s.exercises.some(e => e.muscle === 'quads'));
+  assert.equal(dia2.exercises[0].name, 'Sentadilla trasera o sentadilla en hack');
+  assert.ok(dia2.exercises[0].topSet, 'el Día 2 debería abrir con el top set');
+});
+
+test('DEC-008: si el primero del día no es elegible, se reordena el elegible al frente', () => {
+  // Día 3 Empuje de Men\'s Physique empieza con pecho (fondos/press en
+  // máquina, patrón no elegible); hombros (press militar, elegible) debería
+  // pasar a ser el primero si aparece antes del cierre del día.
+  const plan = E.buildPlan({ name: 'T', sex: 'M', age: 30, heightCm: 178, weightKg: 85, bodyFatPct: 15, activity: 'moderate', level: 'intermediate', daysPerWeek: 5, division: 'physique_m', goal: 'cut' }, TODAY);
+  const empuje = plan.training.sessions.find(s => s.name.includes('Empuje'));
+  const topEx = empuje.exercises.find(e => e.topSet);
+  const ELIGIBLE = ['squat_bilateral', 'bench_press', 'shoulder_press', 'hinge', 'row_barbell', 'vertical_pull'];
+  if (topEx) {
+    assert.equal(empuje.exercises[0], topEx, 'el ejercicio con top set debe quedar primero');
+    assert.ok(ELIGIBLE.includes(topEx.pattern), `patrón ${topEx.pattern} debería ser elegible`);
+  }
 });
 
 test('every source referenced by plan exists in knowledge base', () => {

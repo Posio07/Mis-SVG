@@ -326,6 +326,15 @@
     triceps: cat => ['torso', 'push', 'full'].includes(cat),
   };
 
+  // DEC-008: multiarticulares bilaterales con carga libre o guiada pesada
+  // (ACSM 2009, cargas ≥80% 1RM para fuerza). Lista cerrada a propósito:
+  // sentadilla trasera/hack, press banca, press militar, peso muerto
+  // rumano, remo con barra, dominadas. Nunca unilaterales ni máquinas de
+  // press (por eso "chest_dip_or_machine" y "leg_press" no están).
+  const TOPSET_ELIGIBLE_PATTERNS = new Set([
+    'squat_bilateral', 'bench_press', 'shoulder_press', 'hinge', 'row_barbell', 'vertical_pull',
+  ]);
+
   // DEC-006 (corregido): la "familia" de un ejercicio es su id de patrón
   // explícito del catálogo (knowledge.js), no el texto de su nombre. Antes
   // se agrupaba por palabras del nombre y eso mezclaba por error ejercicios
@@ -506,13 +515,23 @@
       }
     });
 
-    // DEC-002: en definición, el primer multiarticular de cada día lleva un
-    // top set pesado (no suma series nuevas: la primera de sus series pasa a
-    // ser el top set y el resto queda como back-off al -10% de carga).
+    // DEC-002 / DEC-008: en definición, el primer ejercicio ELEGIBLE del día
+    // lleva un top set pesado (no suma series nuevas: la primera de sus
+    // series pasa a ser el top set y el resto queda como back-off al -10%
+    // de carga). Elegible = multiarticular bilateral con carga libre o
+    // guiada pesada (ACSM 2009, ≥80% 1RM); nunca unilaterales ni máquinas
+    // de press. Si el primero del día no es elegible, el elegible se busca
+    // más adelante y pasa a ordenarse primero. Si ninguno es elegible, ese
+    // día no lleva top set.
     if (p.goal === 'cut') {
       sessions.forEach(s => {
-        const idx = s.exercises.findIndex(e => e.type === 'compound');
+        let idx = s.exercises.findIndex(e => TOPSET_ELIGIBLE_PATTERNS.has(e.pattern));
         if (idx === -1) return;
+        if (idx > 0) {
+          const [chosen] = s.exercises.splice(idx, 1);
+          s.exercises.unshift(chosen);
+          idx = 0;
+        }
         const ex = s.exercises[idx];
         s.exercises[idx] = Object.assign({}, ex, {
           topSet: { reps: '4-6', rir: '1-2' },
