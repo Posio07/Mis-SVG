@@ -154,6 +154,28 @@ test('DEC-004: aviso de inconsistencia si %grasa medido y Navy difieren más de 
   assert.ok(!small.warnings.some(w => /difieren en más de 4 puntos/.test(w.text)), 'no debería avisar con diferencia chica');
 });
 
+test('DEC-005: bandera salud/funcional sube el cardio en definición a >=150 min/semana', () => {
+  const off = E.buildPlan(male, TODAY).training.cardio; // male = cut, sin bandera
+  assert.ok(off.sessions * off.minutes < 150, 'por defecto el cardio en definición sigue minimizado');
+  const on = E.buildPlan(Object.assign({}, male, { healthGoal: true }), TODAY).training.cardio;
+  assert.ok(on.sessions * on.minutes >= 150, `con la bandera activa debería haber >=150 min/semana, hay ${on.sessions * on.minutes}`);
+});
+
+test('DEC-005: bandera desactivada no cambia nada (regresión) y activada agrega ejercicios funcionales a pierna', () => {
+  const withoutFlag = E.buildPlan(male, TODAY);
+  assert.equal(withoutFlag.training.cardio.sessions * withoutFlag.training.cardio.minutes, 2 * 25, 'cardio de cut sin bandera no debería cambiar');
+  const withFlag = E.buildPlan(Object.assign({}, male, { healthGoal: true, daysPerWeek: 6, level: 'advanced' }), TODAY);
+  const names = withFlag.training.sessions.flatMap(s => s.exercises.map(e => e.name));
+  const hasFunctional = names.some(n => /Sentadilla búlgara con mancuernas|Step-up con carga|Paseo del granjero/.test(n));
+  assert.ok(hasFunctional, 'con la bandera activa debería poder aparecer algún ejercicio funcional de pierna');
+});
+
+test('DEC-005: healthGoal no es true por defecto ni con valores falsy', () => {
+  assert.equal(E.normalizeProfile(male).healthGoal, false);
+  assert.equal(E.normalizeProfile(Object.assign({}, male, { healthGoal: false })).healthGoal, false);
+  assert.equal(E.normalizeProfile(Object.assign({}, male, { healthGoal: true })).healthGoal, true);
+});
+
 test('every source referenced by plan exists in knowledge base', () => {
   const plan = E.buildPlan(male, TODAY);
   plan.sourcesUsed.forEach(id => assert.ok(K.SOURCES[id], `missing source ${id}`));

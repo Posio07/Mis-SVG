@@ -224,6 +224,8 @@
             <input name="classicLimitLb" type="number" inputmode="numeric" value="${esc(d.classicLimitLb || '')}" placeholder="Deja vacío para usar la tabla orientativa">
             <p class="help">La tabla incluida es la de agosto de 2023 y no pudo verificarse contra el reglamento vigente. Si conoces el límite actual, escríbelo aquí.</p>
           </div>
+          <label style="display:flex;align-items:center;gap:.5rem;margin-top:1rem"><input type="checkbox" name="healthGoal" style="width:auto" ${d.healthGoal ? 'checked' : ''}> Priorizar salud/funcional sobre estética</label>
+          <p class="help">En definición, mantiene el cardio en 150 min/semana en vez de recortarlo, y suma sentadilla búlgara, step-up con carga y paseo del granjero a la rutina de pierna.</p>
         </fieldset>
         <div id="form-errors"></div>
         <div class="btn-row">

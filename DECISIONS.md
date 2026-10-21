@@ -46,4 +46,4 @@ Este archivo es la fuente de verdad de la lógica de negocio. Antes de cambiar c
 - Respaldo cardio: [Posicionamiento] ACSM 2011 / OMS 2020. Ejercicios: [Criterio].
 - Test: bandera activa → cardio ≥150 min/semana; desactivada → sin cambios respecto al comportamiento actual.
 
-**Estado: pendiente.**
+**Estado: implementada.**

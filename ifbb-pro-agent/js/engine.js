@@ -359,17 +359,33 @@
 
     const remaining = Object.assign({}, weeklySets);
     const rotate = {};
+    const rotateExtra = {}; // DEC-005
     const sessions = split.days.map(d => {
       const exercises = [];
       d.muscles.forEach(mu => {
+        // DEC-005: con la bandera "salud/funcional" activa, pierna suma
+        // sentadilla búlgara, step-up con carga y paseo del granjero a su
+        // rotación de ejercicios. Desactivada (por defecto), el catálogo es
+        // el mismo de siempre.
+        const extra = p.healthGoal ? (K.FUNCTIONAL_EXERCISES[mu] || []) : [];
         const lib = K.EXERCISES[mu];
         const perSession = Math.max(2, Math.round(weeklySets[mu] / freq[mu]));
         const sets = Math.min(perSession, Math.max(0, remaining[mu]));
         remaining[mu] -= sets;
         if (sets <= 0) return;
         const idx = rotate[mu] = (rotate[mu] || 0);
-        const picks = sets <= 4 ? [lib[idx % lib.length]] : [lib[idx % lib.length], lib[(idx + 1) % lib.length]];
+        let picks = sets <= 4 ? [lib[idx % lib.length]] : [lib[idx % lib.length], lib[(idx + 1) % lib.length]];
         rotate[mu] = idx + picks.length;
+        if (extra.length) {
+          // Si hay extras activos (DEC-005), uno de los huecos de la sesión
+          // los usa en rotación propia, para que de verdad entren al plan y
+          // no queden solo como entradas al final de una lista que nunca se
+          // recorre tan lejos.
+          const ridx = rotateExtra[mu] = (rotateExtra[mu] || 0);
+          rotateExtra[mu] = ridx + 1;
+          const slot = picks.length - 1;
+          picks = picks.slice(); picks[slot] = extra[ridx % extra.length];
+        }
         const per = Math.floor(sets / picks.length);
         let rest = sets - per * picks.length;
         picks.forEach(ex => {
@@ -396,8 +412,14 @@
       });
     }
 
+    // DEC-005: con la bandera activa, en definición el cardio deja de
+    // minimizarse y respeta un piso de 150 min/semana a intensidad moderada
+    // (OMS 2020 / ACSM 2011), aunque eso implique más interferencia con la
+    // fuerza de la que recomienda Helms et al. 2015 para solo rendimiento.
     const cardio = p.goal === 'cut'
-      ? { sessions: p.level === 'advanced' ? 3 : 2, minutes: 25, type: 'LISS (caminata inclinada, bici, elíptica) al 60-70 % FC máx.; opcional 1 sesión HIIT de 10-15 min', rule: 'La mínima cantidad necesaria para mantener el ritmo de pérdida; añade 10 min/sesión solo si el peso se estanca 2 semanas. Sepáralo del entrenamiento de fuerza o hazlo después.' }
+      ? (p.healthGoal
+        ? { sessions: 3, minutes: 50, type: 'Cardio moderado (caminata, bici, elíptica) al 60-70 % FC máx.', rule: 'Objetivo "salud/funcional" activo: el cardio no se recorta por estar en definición; se mantiene el piso de 150 min/semana recomendado para la salud cardiovascular, aunque interfiera algo más con la ganancia de fuerza.' }
+        : { sessions: p.level === 'advanced' ? 3 : 2, minutes: 25, type: 'LISS (caminata inclinada, bici, elíptica) al 60-70 % FC máx.; opcional 1 sesión HIIT de 10-15 min', rule: 'La mínima cantidad necesaria para mantener el ritmo de pérdida; añade 10 min/sesión solo si el peso se estanca 2 semanas. Sepáralo del entrenamiento de fuerza o hazlo después.' })
       : { sessions: 2, minutes: 25, type: 'Cardio moderado por salud cardiovascular', rule: 'Sin objetivo de gasto: mantiene la capacidad aeróbica y la salud (150 min/semana moderado como referencia general). No interfiere con la hipertrofia a este volumen.' };
 
     return {
@@ -407,7 +429,7 @@
       deload: 'Cada 4-6 semanas, o cuando el rendimiento caiga 2 sesiones seguidas, reduce el volumen a la mitad durante una semana manteniendo la carga.',
       cardio,
       posing: p.division.startsWith('general') ? null : 'Practica las poses obligatorias de tu división 2-3 veces/semana durante 10-15 min; en las últimas 8 semanas a diario. Es parte del juicio y también gasto energético.',
-      sources: ['HELMS_TRAIN', 'SCHOENFELD_VOL', 'SCHOENFELD_FREQ', 'ACSM_RT', 'ACSM_CARDIO'],
+      sources: ['HELMS_TRAIN', 'SCHOENFELD_VOL', 'SCHOENFELD_FREQ', 'ACSM_RT', 'ACSM_CARDIO', 'WHO_PA'],
     };
   }
 
@@ -446,7 +468,7 @@
       daysPerWeek: n(src.daysPerWeek) || 4,
       division, goal: ['cut', 'bulk', 'maintain'].includes(src.goal) ? src.goal : 'cut',
       targetDate: src.targetDate || '', targetBf: n(src.targetBf), classicLimitLb: n(src.classicLimitLb),
-      laggingMuscles,
+      laggingMuscles, healthGoal: !!src.healthGoal,
     };
   }
 
