@@ -358,6 +358,18 @@ test('DEC-008: si el primero del día no es elegible, se reordena el elegible al
   }
 });
 
+test('DEC-005 + cardio: con la bandera activa, Emanuel llega a >=150 min/semana de cardio y el paseo del granjero aparece en algún día', () => {
+  const emanuel = {
+    name: 'Emanuel', sex: 'M', age: 28, heightCm: 175, weightKg: 78, bodyFatPct: 14,
+    activity: 'moderate', level: 'intermediate', daysPerWeek: 5, division: 'physique_m', goal: 'cut',
+    laggingMuscles: ['quads', 'hamstrings', 'glutes'], healthGoal: true,
+  };
+  const plan = E.buildPlan(emanuel, TODAY);
+  assert.ok(plan.training.cardio.sessions * plan.training.cardio.minutes >= 150, 'cardio semanal debería ser >=150 min');
+  const tieneGranjero = plan.training.sessions.some(s => s.exercises.some(e => e.name === 'Paseo del granjero'));
+  assert.ok(tieneGranjero, 'el paseo del granjero debería aparecer en al menos un día (bug: con round-robin simple nunca salía, solo había 2 ocurrencias de cuádriceps/semana para 3 opciones)');
+});
+
 test('every source referenced by plan exists in knowledge base', () => {
   const plan = E.buildPlan(male, TODAY);
   plan.sourcesUsed.forEach(id => assert.ok(K.SOURCES[id], `missing source ${id}`));

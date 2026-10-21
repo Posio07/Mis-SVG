@@ -451,14 +451,33 @@
         if (extra.length) {
           const ridx = rotateExtra[mu] = (rotateExtra[mu] || 0);
           rotateExtra[mu] = ridx + 1;
-          const bonus = extra[ridx % extra.length];
-          const BONUS_SETS = 2;
+          // Si el músculo entrena pocas veces por semana (lo habitual: 2),
+          // un reparto round-robin simple nunca llega a recorrer toda la
+          // lista de extras (con 3 opciones y 2 ocurrencias, la 3ª nunca
+          // sale). Se reserva el acarreo (paseo del granjero) para la
+          // ÚLTIMA vez que el músculo aparece esa semana, y el resto de
+          // ocurrencias rota entre las otras opciones.
+          const carry = extra.find(e => e.pattern === 'loaded_carry');
+          const others = extra.filter(e => e.pattern !== 'loaded_carry');
+          const isLastOccurrence = ridx === (freq[mu] || 1) - 1;
+          const bonus = (carry && isLastOccurrence) ? carry : (others.length ? others[ridx % others.length] : extra[ridx % extra.length]);
           const bonusPattern = bonus.pattern || bonus.name;
           const alreadyThere = exercises.some(e => (e.pattern || e.name) === bonusPattern);
-          const donor = dayEntries.find(e => e.type === 'isolation') || dayEntries[dayEntries.length - 1];
-          if (!alreadyThere && donor && donor.sets - BONUS_SETS >= 2) {
-            donor.sets -= BONUS_SETS;
-            exercises.push({ muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: bonus.name, type: bonus.type, pattern: bonusPattern, unilateral: !!bonus.unilateral, sets: BONUS_SETS, reps: `${bonus.reps[0]}-${bonus.reps[1]}`, rir: bonus.type === 'compound' ? '2-3' : '1-2', rest: bonus.type === 'compound' ? '2-3 min' : '60-90 s' });
+          // Donante: el pick de este músculo ese día con más series de sobra
+          // (prioriza aislamientos). Se prueba con 2 series y, si no entra,
+          // con 1, antes de rendirse por falta de espacio.
+          const isolationPicks = dayEntries.filter(e => e.type === 'isolation');
+          const nonEligibleCompounds = dayEntries.filter(e => e.type === 'compound' && !TOPSET_ELIGIBLE_PATTERNS.has(e.pattern));
+          const pool = isolationPicks.length ? isolationPicks : (nonEligibleCompounds.length ? nonEligibleCompounds : dayEntries);
+          const donor = pool.slice().sort((a, b) => b.sets - a.sets)[0];
+          let bonusSets = 0;
+          if (!alreadyThere && donor) {
+            if (donor.sets - 2 >= 2) bonusSets = 2;
+            else if (donor.sets - 1 >= 2) bonusSets = 1;
+          }
+          if (bonusSets > 0) {
+            donor.sets -= bonusSets;
+            exercises.push({ muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: bonus.name, type: bonus.type, pattern: bonusPattern, unilateral: !!bonus.unilateral, sets: bonusSets, reps: `${bonus.reps[0]}-${bonus.reps[1]}`, rir: bonus.type === 'compound' ? '2-3' : '1-2', rest: bonus.type === 'compound' ? '2-3 min' : '60-90 s' });
           }
           // si no hay de dónde financiarlo ese día sin romper el piso, no se agrega esta vez
         }
