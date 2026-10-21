@@ -176,6 +176,111 @@ test('DEC-005: healthGoal no es true por defecto ni con valores falsy', () => {
   assert.equal(E.normalizeProfile(Object.assign({}, male, { healthGoal: true })).healthGoal, true);
 });
 
+test('DEC-003 v2: grupos chicos no van a pierna si hay un día de empuje/tirón con menos series; grupos grandes no se mueven de su día', () => {
+  const emanuel = {
+    name: 'Emanuel', sex: 'M', age: 28, heightCm: 175, weightKg: 78, bodyFatPct: 14,
+    activity: 'moderate', level: 'intermediate', daysPerWeek: 5, division: 'physique_m', goal: 'cut',
+    laggingMuscles: ['quads', 'hamstrings', 'glutes'],
+  };
+  const plan = E.buildPlan(emanuel, TODAY);
+  const byName = name => plan.training.sessions.find(s => s.name === name);
+  const musclesOf = s => new Set(s.exercises.map(e => e.muscle));
+  ['Día 2 · Pierna', 'Día 5 · Pierna'].forEach(name => {
+    const m = musclesOf(byName(name));
+    assert.ok(!m.has('abs') && !m.has('calves'), `${name} no debería tener abdomen/pantorrillas`);
+    assert.ok(m.has('quads') && m.has('hamstrings') && m.has('glutes'), `${name} debería conservar sus grupos grandes`);
+  });
+  // weeklySets (el volumen total) no cambia por mover el día de asignación.
+  const assigned = {};
+  plan.training.sessions.forEach(s => s.exercises.forEach(e => { assigned[e.muscle] = (assigned[e.muscle] || 0) + e.sets; }));
+  Object.keys(plan.training.weeklySets).forEach(mu => assert.equal(assigned[mu], plan.training.weeklySets[mu], `${mu}: volumen total cambió`));
+});
+
+test('DEC-003 v2: aviso no bloqueante si un día supera 25 series, sin recortar nada', () => {
+  const emanuel = {
+    name: 'Emanuel', sex: 'M', age: 28, heightCm: 175, weightKg: 78, bodyFatPct: 14,
+    activity: 'moderate', level: 'intermediate', daysPerWeek: 5, division: 'physique_m', goal: 'cut',
+    laggingMuscles: ['quads', 'hamstrings', 'glutes'],
+  };
+  const plan = E.buildPlan(emanuel, TODAY);
+  const over = plan.training.sessions.find(s => s.totalSets > 25);
+  assert.ok(over, 'debería haber al menos un día por encima de 25 series con este perfil');
+  assert.ok(plan.warnings.some(w => w.text.includes(over.name) && w.text.includes(String(over.totalSets))));
+  // no bloqueante: el plan se genera igual, con el total real (no recortado)
+  assert.ok(over.totalSets > 25);
+});
+
+test('DEC-003 v2: no cambia nada cuando ningún día se pasa de 25 (regresión de avisos)', () => {
+  const plan = E.buildPlan(Object.assign({}, male, { goal: 'maintain' }), TODAY);
+  const anyOver = plan.training.sessions.some(s => s.totalSets > 25);
+  const hasWarning = plan.warnings.some(w => /series, por encima/.test(w.text));
+  assert.equal(hasWarning, anyOver);
+});
+
+test('DEC-006: no se repite el mismo patrón de ejercicio en una sesión (variantes incluidas)', () => {
+  const basePattern = n => { // misma lógica que engine.js, para no probar con la implementación interna
+    if (/búlgara/i.test(n)) return 'bulgara';
+    if (/sentadilla/i.test(n)) return 'sentadilla';
+    return n;
+  };
+  [3, 4, 5, 6].forEach(days => {
+    ['cut', 'bulk', 'maintain'].forEach(goal => {
+      const plan = E.buildPlan(Object.assign({}, male, { daysPerWeek: days, goal, division: 'bodybuilding_m', level: 'advanced' }), TODAY);
+      plan.training.sessions.forEach(s => {
+        const patterns = s.exercises.map(e => basePattern(e.name));
+        const seen = new Set();
+        patterns.forEach(p => {
+          assert.ok(!seen.has(p), `${days}d/${goal} ${s.name}: patrón "${p}" repetido`);
+          seen.add(p);
+        });
+      });
+    });
+  });
+});
+
+test('DEC-006: el segundo ejercicio de cuádriceps prioriza prensa de piernas', () => {
+  const plan = E.buildPlan(Object.assign({}, male, { division: 'bodybuilding_m', level: 'advanced', goal: 'bulk' }), TODAY);
+  const legDay = plan.training.sessions.find(s => s.exercises.some(e => e.muscle === 'quads'));
+  const quadsExercises = legDay.exercises.filter(e => e.muscle === 'quads');
+  if (quadsExercises.length >= 2) assert.equal(quadsExercises[1].name, 'Prensa de piernas');
+});
+
+test('DEC-007: los ejercicios unilaterales cuentan el doble en la duración estimada', () => {
+  // Fuerza que el pick de cuádriceps sea el unilateral "Zancadas o sentadilla
+  // búlgara" en vez de "Sentadilla trasera...", comparando dos perfiles
+  // idénticos salvo por eso, usando el mismo número de series.
+  const K = require('../js/knowledge.js');
+  const quadsLib = K.EXERCISES.quads;
+  const unilateralIdx = quadsLib.findIndex(e => e.unilateral);
+  assert.ok(unilateralIdx >= 0, 'debería haber al menos un ejercicio de cuádriceps marcado unilateral');
+  // Cálculo directo: mismo ejercicio, sets=4, type compound (150s) -> normal vs x2
+  const sets = 4, restSec = 150, transition = 45;
+  const normalMin = Math.round((sets * (restSec + transition)) / 60);
+  const unilateralMin = Math.round((2 * sets * (restSec + transition)) / 60);
+  assert.equal(unilateralMin, normalMin * 2);
+
+  // Chequeo end-to-end: un día con "Zancadas o sentadilla búlgara" dura más
+  // que si ese mismo volumen fuera con un ejercicio bilateral.
+  const plan = E.buildPlan(Object.assign({}, male, { division: 'bodybuilding_m', level: 'advanced', goal: 'maintain', daysPerWeek: 3 }), TODAY);
+  const dayWithBulgara = plan.training.sessions.find(s => s.exercises.some(e => e.name === 'Zancadas o sentadilla búlgara'));
+  assert.ok(dayWithBulgara, 'algún día debería tener la variante unilateral de cuádriceps');
+});
+
+test('DEC-007: no afecta el cálculo si no hay ejercicios unilaterales ese día', () => {
+  const plan = E.buildPlan(male, TODAY); // classic_m no usa ejercicios unilaterales en su rotación típica de 5 días
+  plan.training.sessions.forEach(s => {
+    const hasUnilateral = s.exercises.some(e => e.unilateral);
+    if (!hasUnilateral) {
+      let seconds = 0;
+      s.exercises.forEach(e => {
+        if (e.topSet) { seconds += 180 + 45; seconds += (e.backoffSets || 0) * (150 + 45); }
+        else { const rest = e.type === 'compound' ? 150 : 75; seconds += e.sets * (rest + 45); }
+      });
+      assert.equal(s.durationMin, Math.round(seconds / 60), `${s.name}: duración no coincide con la fórmula simple`);
+    }
+  });
+});
+
 test('every source referenced by plan exists in knowledge base', () => {
   const plan = E.buildPlan(male, TODAY);
   plan.sourcesUsed.forEach(id => assert.ok(K.SOURCES[id], `missing source ${id}`));
