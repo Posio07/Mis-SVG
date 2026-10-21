@@ -326,6 +326,52 @@
     triceps: cat => ['torso', 'push', 'full'].includes(cat),
   };
 
+  // DEC-006: identifica la "familia" de un ejercicio para no repetir el mismo
+  // patrón (variantes incluidas, p. ej. las dos búlgaras) en una sesión.
+  // Orden importa: los patrones más específicos van antes que los genéricos.
+  const PATTERN_RULES = [
+    [/búlgara/i, 'bulgara'], [/step-up/i, 'step-up'], [/zancada/i, 'zancada'],
+    [/paseo del granjero/i, 'granjero'], [/sentadilla/i, 'sentadilla'],
+    [/peso muerto/i, 'peso-muerto'], [/press banca|press inclinado/i, 'press-pecho'],
+    [/dominadas|jalón al pecho/i, 'jalon-dorsal'], [/remo/i, 'remo'], [/pullover/i, 'pullover'],
+    [/curl femoral/i, 'curl-femoral'], [/extensión de cuádriceps/i, 'extension-cuadriceps'],
+    [/prensa de piernas/i, 'prensa'], [/hip thrust/i, 'hip-thrust'],
+    [/abducción de cadera/i, 'abduccion-cadera'], [/patada de glúteo/i, 'patada-gluteo'],
+    [/elevaciones laterales/i, 'lateral'], [/face pull|pájaros/i, 'face-pull'],
+    [/press militar/i, 'press-militar'], [/aperturas|pec-deck/i, 'apertura-pecho'],
+    [/fondos en paralelas/i, 'fondos-pecho'], [/press cerrado/i, 'press-cerrado-triceps'],
+    [/extensión de tríceps/i, 'extension-triceps'],
+    [/curl (con barra|inclinado)/i, 'curl-biceps'], [/elevación de talones/i, 'gemelo'],
+    [/crunch|rueda abdominal/i, 'abdominal-flexion'], [/elevaciones de piernas/i, 'abdominal-piernas'],
+    [/vacuum/i, 'vacuum'],
+  ];
+  function basePattern(name) {
+    for (const [re, key] of PATTERN_RULES) if (re.test(name)) return key;
+    return name; // sin regla: el propio nombre es su patrón (no choca con nada más)
+  }
+  // Si el candidato ya se usó ese día, busca en la misma lista la siguiente
+  // opción que no choque. Si todas chocan, se permite el duplicado (no hay
+  // alternativa real para ese músculo ese día).
+  function resolvePick(candidate, lib, usedPatterns) {
+    if (!usedPatterns.has(basePattern(candidate.name))) return candidate;
+    const startIdx = lib.indexOf(candidate);
+    for (let step = 1; step <= lib.length; step++) {
+      const alt = lib[(startIdx + step) % lib.length];
+      if (!usedPatterns.has(basePattern(alt.name))) return alt;
+    }
+    return candidate;
+  }
+  // Resuelve colisiones dentro de un mismo conjunto de picks para un día,
+  // en orden, y deja el set de patrones usados actualizado.
+  function dedupPicks(picks, lib, dayExercises) {
+    const used = new Set(dayExercises.map(e => basePattern(e.name)));
+    return picks.map(ex => {
+      const resolved = resolvePick(ex, lib, used);
+      used.add(basePattern(resolved.name));
+      return resolved;
+    });
+  }
+
   const EMPHASIS_MAP = {
     bodybuilding_m: { up: ['back', 'quads'], down: [] },
     classic_m: { up: ['shoulders', 'back', 'quads'], down: [] },
@@ -392,12 +438,19 @@
           // Si hay extras activos (DEC-005), uno de los huecos de la sesión
           // los usa en rotación propia, para que de verdad entren al plan y
           // no queden solo como entradas al final de una lista que nunca se
-          // recorre tan lejos.
+          // recorre tan lejos. Va en el primer hueco: el segundo de
+          // cuádriceps lo reserva DEC-006 para la prensa.
           const ridx = rotateExtra[mu] = (rotateExtra[mu] || 0);
           rotateExtra[mu] = ridx + 1;
-          const slot = picks.length - 1;
-          picks = picks.slice(); picks[slot] = extra[ridx % extra.length];
+          picks = picks.slice(); picks[0] = extra[ridx % extra.length];
         }
+        if (mu === 'quads' && picks.length === 2) {
+          // DEC-006: el segundo ejercicio de cuádriceps prioriza prensa.
+          const prensa = lib.find(e => e.name === 'Prensa de piernas');
+          if (prensa) { picks = picks.slice(); picks[1] = prensa; }
+        }
+        // DEC-006: ningún patrón (variantes incluidas) se repite en el día.
+        picks = dedupPicks(picks, lib, exercises);
         const per = Math.floor(sets / picks.length);
         let rest = sets - per * picks.length;
         picks.forEach(ex => {
@@ -434,11 +487,12 @@
         remainingMu -= sets;
         if (sets <= 0) return;
         const idx = rotate[mu] = (rotate[mu] || 0);
-        const picks = sets <= 4 ? [lib[idx % lib.length]] : [lib[idx % lib.length], lib[(idx + 1) % lib.length]];
+        let picks = sets <= 4 ? [lib[idx % lib.length]] : [lib[idx % lib.length], lib[(idx + 1) % lib.length]];
         rotate[mu] = idx + picks.length;
+        const s = sessions[dayIdx];
+        picks = dedupPicks(picks, lib, s.exercises); // DEC-006
         const per = Math.floor(sets / picks.length);
         let rest = sets - per * picks.length;
-        const s = sessions[dayIdx];
         picks.forEach(ex => {
           const n = per + (rest-- > 0 ? 1 : 0);
           s.exercises.push({ muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: ex.name, type: ex.type, sets: n, reps: `${ex.reps[0]}-${ex.reps[1]}`, rir: ex.type === 'compound' ? '2-3' : '1-2', rest: ex.type === 'compound' ? '2-3 min' : '60-90 s' });

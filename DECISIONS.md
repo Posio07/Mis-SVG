@@ -49,7 +49,7 @@ Este archivo es la fuente de verdad de la lógica de negocio. Antes de cambiar c
 - Para el segundo ejercicio de cuádriceps, priorizar prensa.
 - Respaldo: [Criterio].
 
-**Estado: pendiente.**
+**Estado: implementada.**
 
 ## DEC-007 · Tiempo de unilaterales
 - En la duración estimada, los ejercicios unilaterales cuentan doble.

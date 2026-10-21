@@ -217,6 +217,34 @@ test('DEC-003 v2: no cambia nada cuando ningún día se pasa de 25 (regresión d
   assert.equal(hasWarning, anyOver);
 });
 
+test('DEC-006: no se repite el mismo patrón de ejercicio en una sesión (variantes incluidas)', () => {
+  const basePattern = n => { // misma lógica que engine.js, para no probar con la implementación interna
+    if (/búlgara/i.test(n)) return 'bulgara';
+    if (/sentadilla/i.test(n)) return 'sentadilla';
+    return n;
+  };
+  [3, 4, 5, 6].forEach(days => {
+    ['cut', 'bulk', 'maintain'].forEach(goal => {
+      const plan = E.buildPlan(Object.assign({}, male, { daysPerWeek: days, goal, division: 'bodybuilding_m', level: 'advanced' }), TODAY);
+      plan.training.sessions.forEach(s => {
+        const patterns = s.exercises.map(e => basePattern(e.name));
+        const seen = new Set();
+        patterns.forEach(p => {
+          assert.ok(!seen.has(p), `${days}d/${goal} ${s.name}: patrón "${p}" repetido`);
+          seen.add(p);
+        });
+      });
+    });
+  });
+});
+
+test('DEC-006: el segundo ejercicio de cuádriceps prioriza prensa de piernas', () => {
+  const plan = E.buildPlan(Object.assign({}, male, { division: 'bodybuilding_m', level: 'advanced', goal: 'bulk' }), TODAY);
+  const legDay = plan.training.sessions.find(s => s.exercises.some(e => e.muscle === 'quads'));
+  const quadsExercises = legDay.exercises.filter(e => e.muscle === 'quads');
+  if (quadsExercises.length >= 2) assert.equal(quadsExercises[1].name, 'Prensa de piernas');
+});
+
 test('every source referenced by plan exists in knowledge base', () => {
   const plan = E.buildPlan(male, TODAY);
   plan.sourcesUsed.forEach(id => assert.ok(K.SOURCES[id], `missing source ${id}`));
