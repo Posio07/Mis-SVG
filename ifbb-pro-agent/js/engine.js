@@ -285,33 +285,45 @@
 
   /* ---------- Entrenamiento ---------- */
 
+  // DEC-003 v2: solo los grupos GRANDES tienen día fijo acá. Los chicos
+  // (abdomen, pantorrillas, bíceps, tríceps) se asignan al generar el plan,
+  // según qué día de cada categoría tenga menos series (ver computeTraining).
+  // category: 'full' (cuerpo completo), 'torso', 'legs', 'push', 'pull'.
   const SPLITS = {
     3: { name: 'Cuerpo completo ×3', days: [
-      { name: 'Día 1 · Full body A', muscles: ['quads', 'chest', 'back', 'shoulders', 'hamstrings', 'abs'] },
-      { name: 'Día 2 · Full body B', muscles: ['hamstrings', 'glutes', 'back', 'chest', 'biceps', 'triceps', 'calves'] },
-      { name: 'Día 3 · Full body C', muscles: ['quads', 'shoulders', 'back', 'chest', 'glutes', 'abs', 'calves'] },
+      { name: 'Día 1 · Full body A', muscles: ['quads', 'chest', 'back', 'shoulders', 'hamstrings'], category: 'full' },
+      { name: 'Día 2 · Full body B', muscles: ['hamstrings', 'glutes', 'back', 'chest'], category: 'full' },
+      { name: 'Día 3 · Full body C', muscles: ['quads', 'shoulders', 'back', 'chest', 'glutes'], category: 'full' },
     ] },
     4: { name: 'Torso / Pierna ×2', days: [
-      { name: 'Día 1 · Torso A', muscles: ['chest', 'back', 'shoulders', 'biceps', 'triceps'] },
-      { name: 'Día 2 · Pierna A', muscles: ['quads', 'hamstrings', 'glutes', 'calves', 'abs'] },
-      { name: 'Día 3 · Torso B', muscles: ['back', 'chest', 'shoulders', 'triceps', 'biceps'] },
-      { name: 'Día 4 · Pierna B', muscles: ['hamstrings', 'glutes', 'quads', 'calves', 'abs'] },
+      { name: 'Día 1 · Torso A', muscles: ['chest', 'back', 'shoulders'], category: 'torso' },
+      { name: 'Día 2 · Pierna A', muscles: ['quads', 'hamstrings', 'glutes'], category: 'legs' },
+      { name: 'Día 3 · Torso B', muscles: ['back', 'chest', 'shoulders'], category: 'torso' },
+      { name: 'Día 4 · Pierna B', muscles: ['hamstrings', 'glutes', 'quads'], category: 'legs' },
     ] },
     5: { name: 'Torso / Pierna / Empuje / Tirón / Pierna', days: [
-      { name: 'Día 1 · Torso', muscles: ['chest', 'back', 'shoulders', 'biceps', 'triceps'] },
-      { name: 'Día 2 · Pierna', muscles: ['quads', 'hamstrings', 'glutes', 'calves', 'abs'] },
-      { name: 'Día 3 · Empuje', muscles: ['chest', 'shoulders', 'triceps'] },
-      { name: 'Día 4 · Tirón', muscles: ['back', 'biceps', 'shoulders'] },
-      { name: 'Día 5 · Pierna', muscles: ['glutes', 'hamstrings', 'quads', 'calves', 'abs'] },
+      { name: 'Día 1 · Torso', muscles: ['chest', 'back', 'shoulders'], category: 'torso' },
+      { name: 'Día 2 · Pierna', muscles: ['quads', 'hamstrings', 'glutes'], category: 'legs' },
+      { name: 'Día 3 · Empuje', muscles: ['chest', 'shoulders'], category: 'push' },
+      { name: 'Día 4 · Tirón', muscles: ['back', 'shoulders'], category: 'pull' },
+      { name: 'Día 5 · Pierna', muscles: ['glutes', 'hamstrings', 'quads'], category: 'legs' },
     ] },
     6: { name: 'Empuje / Tirón / Pierna ×2', days: [
-      { name: 'Día 1 · Empuje A', muscles: ['chest', 'shoulders', 'triceps'] },
-      { name: 'Día 2 · Tirón A', muscles: ['back', 'biceps', 'shoulders'] },
-      { name: 'Día 3 · Pierna A', muscles: ['quads', 'hamstrings', 'glutes', 'calves', 'abs'] },
-      { name: 'Día 4 · Empuje B', muscles: ['shoulders', 'chest', 'triceps'] },
-      { name: 'Día 5 · Tirón B', muscles: ['back', 'shoulders', 'biceps'] },
-      { name: 'Día 6 · Pierna B', muscles: ['glutes', 'hamstrings', 'quads', 'calves', 'abs'] },
+      { name: 'Día 1 · Empuje A', muscles: ['chest', 'shoulders'], category: 'push' },
+      { name: 'Día 2 · Tirón A', muscles: ['back', 'shoulders'], category: 'pull' },
+      { name: 'Día 3 · Pierna A', muscles: ['quads', 'hamstrings', 'glutes'], category: 'legs' },
+      { name: 'Día 4 · Empuje B', muscles: ['shoulders', 'chest'], category: 'push' },
+      { name: 'Día 5 · Tirón B', muscles: ['back', 'shoulders'], category: 'pull' },
+      { name: 'Día 6 · Pierna B', muscles: ['glutes', 'hamstrings', 'quads'], category: 'legs' },
     ] },
+  };
+  const SMALL_MUSCLES_LIST = ['abs', 'calves', 'biceps', 'triceps'];
+  // Compatibilidad de cada grupo chico con la categoría del día (DEC-003 v2).
+  const SMALL_COMPAT = {
+    abs: () => true,
+    calves: () => true,
+    biceps: cat => ['torso', 'pull', 'full'].includes(cat),
+    triceps: cat => ['torso', 'push', 'full'].includes(cat),
   };
 
   const EMPHASIS_MAP = {
@@ -396,6 +408,54 @@
       return { name: d.name, exercises, totalSets: exercises.reduce((a, e) => a + e.sets, 0) };
     });
 
+    // DEC-003 v2: los grupos chicos (abdomen, pantorrillas, bíceps, tríceps)
+    // se reparten entre los días COMPATIBLES con menos series acumuladas
+    // hasta ahora. Los grupos grandes no se tocan: ya quedaron fijos arriba.
+    const trainingWarnings = [];
+    SMALL_MUSCLES_LIST.forEach(mu => {
+      const eligible = split.days.map((d, i) => ({ i, cat: d.category })).filter(x => SMALL_COMPAT[mu](x.cat));
+      if (!eligible.length) return;
+      const preferNonLeg = mu === 'abs' || mu === 'calves';
+      eligible.sort((a, b) => {
+        const prefA = preferNonLeg && a.cat === 'legs' ? 1 : 0;
+        const prefB = preferNonLeg && b.cat === 'legs' ? 1 : 0;
+        if (prefA !== prefB) return prefA - prefB;
+        return sessions[a.i].totalSets - sessions[b.i].totalSets;
+      });
+      const freqMu = Math.min(2, eligible.length);
+      freq[mu] = freqMu;
+      const chosen = eligible.slice(0, freqMu).map(x => x.i);
+      const lib = K.EXERCISES[mu];
+      const perSession = Math.max(2, Math.round(weeklySets[mu] / freqMu));
+      let remainingMu = weeklySets[mu];
+      chosen.forEach((dayIdx, k) => {
+        const isLast = k === chosen.length - 1;
+        const sets = isLast ? Math.max(0, remainingMu) : Math.min(perSession, remainingMu);
+        remainingMu -= sets;
+        if (sets <= 0) return;
+        const idx = rotate[mu] = (rotate[mu] || 0);
+        const picks = sets <= 4 ? [lib[idx % lib.length]] : [lib[idx % lib.length], lib[(idx + 1) % lib.length]];
+        rotate[mu] = idx + picks.length;
+        const per = Math.floor(sets / picks.length);
+        let rest = sets - per * picks.length;
+        const s = sessions[dayIdx];
+        picks.forEach(ex => {
+          const n = per + (rest-- > 0 ? 1 : 0);
+          s.exercises.push({ muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: ex.name, type: ex.type, sets: n, reps: `${ex.reps[0]}-${ex.reps[1]}`, rir: ex.type === 'compound' ? '2-3' : '1-2', rest: ex.type === 'compound' ? '2-3 min' : '60-90 s' });
+          s.totalSets += n;
+        });
+      });
+    });
+
+    // DEC-003 v2: aviso no bloqueante si un día se pasa de 25 series. No se
+    // recorta ni se mueve nada automáticamente.
+    const SESSION_SET_CAP = 25;
+    sessions.forEach(s => {
+      if (s.totalSets > SESSION_SET_CAP) {
+        trainingWarnings.push({ level: 'warn', text: `${s.name}: ${s.totalSets} series, por encima de las ${SESSION_SET_CAP} recomendadas por sesión. No se recorta nada automáticamente; si te resulta muy largo, movés vos algún aislamiento a otro día.` });
+      }
+    });
+
     // DEC-002: en definición, el primer multiarticular de cada día lleva un
     // top set pesado (no suma series nuevas: la primera de sus series pasa a
     // ser el top set y el resto queda como back-off al -10% de carga).
@@ -411,6 +471,22 @@
         });
       });
     }
+
+    // DEC-003 v2: duración estimada por día = series × (descanso medio + 45 s
+    // de transición/ejecución), redondeada a minutos (criterio de la app).
+    sessions.forEach(s => {
+      let seconds = 0;
+      s.exercises.forEach(e => {
+        if (e.topSet) {
+          seconds += 1 * (180 + 45);
+          seconds += (e.backoffSets || 0) * (150 + 45);
+        } else {
+          const rest = e.type === 'compound' ? 150 : 75;
+          seconds += e.sets * (rest + 45);
+        }
+      });
+      s.durationMin = Math.round(seconds / 60);
+    });
 
     // DEC-005: con la bandera activa, en definición el cardio deja de
     // minimizarse y respeta un piso de 150 min/semana a intensidad moderada
@@ -430,6 +506,7 @@
       cardio,
       posing: p.division.startsWith('general') ? null : 'Practica las poses obligatorias de tu división 2-3 veces/semana durante 10-15 min; en las últimas 8 semanas a diario. Es parte del juicio y también gasto energético.',
       sources: ['HELMS_TRAIN', 'SCHOENFELD_VOL', 'SCHOENFELD_FREQ', 'ACSM_RT', 'ACSM_CARDIO', 'WHO_PA'],
+      warnings: trainingWarnings,
     };
   }
 
@@ -443,7 +520,7 @@
     const nutrition = computeNutrition(p, metrics, targets);
     const training = computeTraining(p, targets);
     const supplements = K.SUPPLEMENTS.filter(s => p.goal !== 'bulk' || s.source !== 'HELMS_NUT');
-    const warnings = [].concat(metrics.warnings, targets.warnings, nutrition.warnings);
+    const warnings = [].concat(metrics.warnings, targets.warnings, nutrition.warnings, training.warnings);
     const sourcesUsed = unique([metrics.bmrMethod, 'NAVY', 'KOURI', 'ACE_BF', 'ASHWELL', 'ROSSOW', 'IFBB_RULES'].concat(nutrition.sources, training.sources, supplements.map(s => s.source)));
     return {
       generatedAt: today, input: p, metrics, targets, nutrition, training, supplements, warnings, sourcesUsed,

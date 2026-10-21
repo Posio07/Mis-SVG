@@ -30,7 +30,32 @@ Este archivo es la fuente de verdad de la lógica de negocio. Antes de cambiar c
 - Respaldo: [Criterio].
 - Test: ninguna sesión supera el tope y ningún multiarticular desaparece.
 
-**Estado: revertida.** Motivo: se probaron dos algoritmos (recorte+reubicación en una sola pasada, y luego en dos fases separando "calcular recortes" de "reubicar en días con espacio libre). El segundo cumple el propio criterio de DEC-003 (ninguna sesión supera el tope, ningún multiarticular desaparece) para el perfil de ejemplo, pero expone un problema real: cuando un grupo muscular pequeño se entrena en 2 días y AMBOS están al límite de series, ese grupo pierde series de forma permanente esa semana (nadie tiene sitio para recibirlas), lo que puede dejar el total semanal mostrado (`weeklySets`) sin corresponder con lo que realmente aparece en las sesiones. Esto se vio en rutinas de cuerpo completo (3 días) y en divisiones con mucho énfasis en pierna (ej. Wellness). Arreglarlo bien (por ejemplo, subiendo el tope mínimo según el volumen real de la división, o definiendo qué hacer cuando no hay ningún día con espacio) es una decisión de producto, no un ajuste de algoritmo de dos intentos. Se necesita una re-especificación antes de reintentar: ¿el tope debe poder ceder (mostrar aviso) en vez de perder series silenciosamente? ¿Debe haber un piso de series para grupos pequeños aunque se supere el tope?
+**Estado: REEMPLAZADA por DEC-003 v2** (motivo: el plan recortaba series de grupos chicos cuando un día se pasaba del tope e intentaba pasarlas a otro día; si ese otro día también estaba al límite, las series se perdían sin avisar, y el total semanal mostrado dejaba de coincidir con lo que realmente aparecía en la rutina).
+
+## DEC-003 v2 · Distribución balanceada + aviso de tope
+- Al GENERAR el plan (no después), los grupos pequeños se asignan a los días compatibles con menos series totales:
+  · Abdomen y pantorrillas: cualquier día; prioridad a los días que no son de pierna.
+  · Bíceps: días de torso o tirón. Tríceps: días de torso o empuje.
+- Los grupos grandes no se mueven de su día.
+- Duración estimada visible por día: series × (descanso medio + 45 s); los unilaterales cuentan doble (ver DEC-007).
+- Si un día supera 25 series, mostrar un aviso no bloqueante. No recortar ni mover nada automáticamente.
+- Respaldo: [Criterio].
+- Test: perfil Emanuel → los días de pierna no tienen abdomen ni pantorrillas si existe un día de empuje o tirón con menos series; un día con 26 series muestra el aviso.
+
+**Estado: implementada (duración sin doblar unilaterales todavía: eso llega con DEC-007).**
+
+## DEC-006 · Sin patrones duplicados por sesión
+- Un mismo ejercicio base (incluidas sus variantes, por ejemplo "búlgara" y "búlgara con énfasis en cadera") aparece como máximo una vez por sesión. Puede repetirse en días distintos.
+- Para el segundo ejercicio de cuádriceps, priorizar prensa.
+- Respaldo: [Criterio].
+
+**Estado: pendiente.**
+
+## DEC-007 · Tiempo de unilaterales
+- En la duración estimada, los ejercicios unilaterales cuentan doble.
+- Respaldo: [Criterio].
+
+**Estado: pendiente.**
 
 ## DEC-004 · Aviso de inconsistencia en % de grasa
 - Si hay % de grasa ingresado Y circunferencias, calcular también el % por fórmula Navy. Si la diferencia es mayor a 4 puntos, mostrar un aviso no bloqueante con ambos valores.

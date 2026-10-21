@@ -176,6 +176,47 @@ test('DEC-005: healthGoal no es true por defecto ni con valores falsy', () => {
   assert.equal(E.normalizeProfile(Object.assign({}, male, { healthGoal: true })).healthGoal, true);
 });
 
+test('DEC-003 v2: grupos chicos no van a pierna si hay un día de empuje/tirón con menos series; grupos grandes no se mueven de su día', () => {
+  const emanuel = {
+    name: 'Emanuel', sex: 'M', age: 28, heightCm: 175, weightKg: 78, bodyFatPct: 14,
+    activity: 'moderate', level: 'intermediate', daysPerWeek: 5, division: 'physique_m', goal: 'cut',
+    laggingMuscles: ['quads', 'hamstrings', 'glutes'],
+  };
+  const plan = E.buildPlan(emanuel, TODAY);
+  const byName = name => plan.training.sessions.find(s => s.name === name);
+  const musclesOf = s => new Set(s.exercises.map(e => e.muscle));
+  ['Día 2 · Pierna', 'Día 5 · Pierna'].forEach(name => {
+    const m = musclesOf(byName(name));
+    assert.ok(!m.has('abs') && !m.has('calves'), `${name} no debería tener abdomen/pantorrillas`);
+    assert.ok(m.has('quads') && m.has('hamstrings') && m.has('glutes'), `${name} debería conservar sus grupos grandes`);
+  });
+  // weeklySets (el volumen total) no cambia por mover el día de asignación.
+  const assigned = {};
+  plan.training.sessions.forEach(s => s.exercises.forEach(e => { assigned[e.muscle] = (assigned[e.muscle] || 0) + e.sets; }));
+  Object.keys(plan.training.weeklySets).forEach(mu => assert.equal(assigned[mu], plan.training.weeklySets[mu], `${mu}: volumen total cambió`));
+});
+
+test('DEC-003 v2: aviso no bloqueante si un día supera 25 series, sin recortar nada', () => {
+  const emanuel = {
+    name: 'Emanuel', sex: 'M', age: 28, heightCm: 175, weightKg: 78, bodyFatPct: 14,
+    activity: 'moderate', level: 'intermediate', daysPerWeek: 5, division: 'physique_m', goal: 'cut',
+    laggingMuscles: ['quads', 'hamstrings', 'glutes'],
+  };
+  const plan = E.buildPlan(emanuel, TODAY);
+  const over = plan.training.sessions.find(s => s.totalSets > 25);
+  assert.ok(over, 'debería haber al menos un día por encima de 25 series con este perfil');
+  assert.ok(plan.warnings.some(w => w.text.includes(over.name) && w.text.includes(String(over.totalSets))));
+  // no bloqueante: el plan se genera igual, con el total real (no recortado)
+  assert.ok(over.totalSets > 25);
+});
+
+test('DEC-003 v2: no cambia nada cuando ningún día se pasa de 25 (regresión de avisos)', () => {
+  const plan = E.buildPlan(Object.assign({}, male, { goal: 'maintain' }), TODAY);
+  const anyOver = plan.training.sessions.some(s => s.totalSets > 25);
+  const hasWarning = plan.warnings.some(w => /series, por encima/.test(w.text));
+  assert.equal(hasWarning, anyOver);
+});
+
 test('every source referenced by plan exists in knowledge base', () => {
   const plan = E.buildPlan(male, TODAY);
   plan.sourcesUsed.forEach(id => assert.ok(K.SOURCES[id], `missing source ${id}`));
