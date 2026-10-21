@@ -326,48 +326,42 @@
     triceps: cat => ['torso', 'push', 'full'].includes(cat),
   };
 
-  // DEC-006: identifica la "familia" de un ejercicio para no repetir el mismo
-  // patrón (variantes incluidas, p. ej. las dos búlgaras) en una sesión.
-  // Orden importa: los patrones más específicos van antes que los genéricos.
-  const PATTERN_RULES = [
-    [/búlgara/i, 'bulgara'], [/step-up/i, 'step-up'], [/zancada/i, 'zancada'],
-    [/paseo del granjero/i, 'granjero'], [/sentadilla/i, 'sentadilla'],
-    [/peso muerto/i, 'peso-muerto'], [/press banca|press inclinado/i, 'press-pecho'],
-    [/dominadas|jalón al pecho/i, 'jalon-dorsal'], [/remo/i, 'remo'], [/pullover/i, 'pullover'],
-    [/curl femoral/i, 'curl-femoral'], [/extensión de cuádriceps/i, 'extension-cuadriceps'],
-    [/prensa de piernas/i, 'prensa'], [/hip thrust/i, 'hip-thrust'],
-    [/abducción de cadera/i, 'abduccion-cadera'], [/patada de glúteo/i, 'patada-gluteo'],
-    [/elevaciones laterales/i, 'lateral'], [/face pull|pájaros/i, 'face-pull'],
-    [/press militar/i, 'press-militar'], [/aperturas|pec-deck/i, 'apertura-pecho'],
-    [/fondos en paralelas/i, 'fondos-pecho'], [/press cerrado/i, 'press-cerrado-triceps'],
-    [/extensión de tríceps/i, 'extension-triceps'],
-    [/curl (con barra|inclinado)/i, 'curl-biceps'], [/elevación de talones/i, 'gemelo'],
-    [/crunch|rueda abdominal/i, 'abdominal-flexion'], [/elevaciones de piernas/i, 'abdominal-piernas'],
-    [/vacuum/i, 'vacuum'],
-  ];
-  function basePattern(name) {
-    for (const [re, key] of PATTERN_RULES) if (re.test(name)) return key;
-    return name; // sin regla: el propio nombre es su patrón (no choca con nada más)
+  // DEC-008: multiarticulares bilaterales con carga libre o guiada pesada
+  // (ACSM 2009, cargas ≥80% 1RM para fuerza). Lista cerrada a propósito:
+  // sentadilla trasera/hack, press banca, press militar, peso muerto
+  // rumano, remo con barra, dominadas. Nunca unilaterales ni máquinas de
+  // press (por eso "chest_dip_or_machine" y "leg_press" no están).
+  const TOPSET_ELIGIBLE_PATTERNS = new Set([
+    'squat_bilateral', 'bench_press', 'shoulder_press', 'hinge', 'row_barbell', 'vertical_pull',
+  ]);
+
+  // DEC-006 (corregido): la "familia" de un ejercicio es su id de patrón
+  // explícito del catálogo (knowledge.js), no el texto de su nombre. Antes
+  // se agrupaba por palabras del nombre y eso mezclaba por error ejercicios
+  // distintos que compartían una palabra (p. ej. "fondos" aparecía tanto en
+  // un ejercicio de pecho como en uno de tríceps).
+  function basePattern(ex) {
+    return ex && ex.pattern ? ex.pattern : (ex && ex.name); // sin id: el propio nombre es su patrón
   }
   // Si el candidato ya se usó ese día, busca en la misma lista la siguiente
   // opción que no choque. Si todas chocan, se permite el duplicado (no hay
   // alternativa real para ese músculo ese día).
   function resolvePick(candidate, lib, usedPatterns) {
-    if (!usedPatterns.has(basePattern(candidate.name))) return candidate;
+    if (!usedPatterns.has(basePattern(candidate))) return candidate;
     const startIdx = lib.indexOf(candidate);
     for (let step = 1; step <= lib.length; step++) {
       const alt = lib[(startIdx + step) % lib.length];
-      if (!usedPatterns.has(basePattern(alt.name))) return alt;
+      if (!usedPatterns.has(basePattern(alt))) return alt;
     }
     return candidate;
   }
   // Resuelve colisiones dentro de un mismo conjunto de picks para un día,
   // en orden, y deja el set de patrones usados actualizado.
   function dedupPicks(picks, lib, dayExercises) {
-    const used = new Set(dayExercises.map(e => basePattern(e.name)));
+    const used = new Set(dayExercises.map(e => e.pattern || e.name));
     return picks.map(ex => {
       const resolved = resolvePick(ex, lib, used);
-      used.add(basePattern(resolved.name));
+      used.add(basePattern(resolved));
       return resolved;
     });
   }
@@ -434,16 +428,6 @@
         const idx = rotate[mu] = (rotate[mu] || 0);
         let picks = sets <= 4 ? [lib[idx % lib.length]] : [lib[idx % lib.length], lib[(idx + 1) % lib.length]];
         rotate[mu] = idx + picks.length;
-        if (extra.length) {
-          // Si hay extras activos (DEC-005), uno de los huecos de la sesión
-          // los usa en rotación propia, para que de verdad entren al plan y
-          // no queden solo como entradas al final de una lista que nunca se
-          // recorre tan lejos. Va en el primer hueco: el segundo de
-          // cuádriceps lo reserva DEC-006 para la prensa.
-          const ridx = rotateExtra[mu] = (rotateExtra[mu] || 0);
-          rotateExtra[mu] = ridx + 1;
-          picks = picks.slice(); picks[0] = extra[ridx % extra.length];
-        }
         if (mu === 'quads' && picks.length === 2) {
           // DEC-006: el segundo ejercicio de cuádriceps prioriza prensa.
           const prensa = lib.find(e => e.name === 'Prensa de piernas');
@@ -453,10 +437,50 @@
         picks = dedupPicks(picks, lib, exercises);
         const per = Math.floor(sets / picks.length);
         let rest = sets - per * picks.length;
-        picks.forEach(ex => {
+        const dayEntries = picks.map(ex => {
           const n = per + (rest-- > 0 ? 1 : 0);
-          exercises.push({ muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: ex.name, type: ex.type, unilateral: !!ex.unilateral, sets: n, reps: `${ex.reps[0]}-${ex.reps[1]}`, rir: ex.type === 'compound' ? '2-3' : '1-2', rest: ex.type === 'compound' ? '2-3 min' : '60-90 s' });
+          return { muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: ex.name, type: ex.type, pattern: ex.pattern || ex.name, unilateral: !!ex.unilateral, sets: n, reps: `${ex.reps[0]}-${ex.reps[1]}`, rir: ex.type === 'compound' ? '2-3' : '1-2', rest: ex.type === 'compound' ? '2-3 min' : '60-90 s' };
         });
+        dayEntries.forEach(e => exercises.push(e));
+        // DEC-005 (aclarado): con la bandera activa, el ejercicio funcional
+        // se SUMA después de los principales; nunca reemplaza el patrón
+        // bilateral pesado del día. Se financia quitándole series a un
+        // aislamiento del mismo grupo ese día (o, si no hay, al último
+        // ejercicio puesto), sin bajarlo de un piso de 2 series, para no
+        // tocar el volumen semanal de DEC-001.
+        if (extra.length) {
+          const ridx = rotateExtra[mu] = (rotateExtra[mu] || 0);
+          rotateExtra[mu] = ridx + 1;
+          // Si el músculo entrena pocas veces por semana (lo habitual: 2),
+          // un reparto round-robin simple nunca llega a recorrer toda la
+          // lista de extras (con 3 opciones y 2 ocurrencias, la 3ª nunca
+          // sale). Se reserva el acarreo (paseo del granjero) para la
+          // ÚLTIMA vez que el músculo aparece esa semana, y el resto de
+          // ocurrencias rota entre las otras opciones.
+          const carry = extra.find(e => e.pattern === 'loaded_carry');
+          const others = extra.filter(e => e.pattern !== 'loaded_carry');
+          const isLastOccurrence = ridx === (freq[mu] || 1) - 1;
+          const bonus = (carry && isLastOccurrence) ? carry : (others.length ? others[ridx % others.length] : extra[ridx % extra.length]);
+          const bonusPattern = bonus.pattern || bonus.name;
+          const alreadyThere = exercises.some(e => (e.pattern || e.name) === bonusPattern);
+          // Donante: el pick de este músculo ese día con más series de sobra
+          // (prioriza aislamientos). Se prueba con 2 series y, si no entra,
+          // con 1, antes de rendirse por falta de espacio.
+          const isolationPicks = dayEntries.filter(e => e.type === 'isolation');
+          const nonEligibleCompounds = dayEntries.filter(e => e.type === 'compound' && !TOPSET_ELIGIBLE_PATTERNS.has(e.pattern));
+          const pool = isolationPicks.length ? isolationPicks : (nonEligibleCompounds.length ? nonEligibleCompounds : dayEntries);
+          const donor = pool.slice().sort((a, b) => b.sets - a.sets)[0];
+          let bonusSets = 0;
+          if (!alreadyThere && donor) {
+            if (donor.sets - 2 >= 2) bonusSets = 2;
+            else if (donor.sets - 1 >= 2) bonusSets = 1;
+          }
+          if (bonusSets > 0) {
+            donor.sets -= bonusSets;
+            exercises.push({ muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: bonus.name, type: bonus.type, pattern: bonusPattern, unilateral: !!bonus.unilateral, sets: bonusSets, reps: `${bonus.reps[0]}-${bonus.reps[1]}`, rir: bonus.type === 'compound' ? '2-3' : '1-2', rest: bonus.type === 'compound' ? '2-3 min' : '60-90 s' });
+          }
+          // si no hay de dónde financiarlo ese día sin romper el piso, no se agrega esta vez
+        }
       });
       return { name: d.name, exercises, totalSets: exercises.reduce((a, e) => a + e.sets, 0) };
     });
@@ -495,7 +519,7 @@
         let rest = sets - per * picks.length;
         picks.forEach(ex => {
           const n = per + (rest-- > 0 ? 1 : 0);
-          s.exercises.push({ muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: ex.name, type: ex.type, unilateral: !!ex.unilateral, sets: n, reps: `${ex.reps[0]}-${ex.reps[1]}`, rir: ex.type === 'compound' ? '2-3' : '1-2', rest: ex.type === 'compound' ? '2-3 min' : '60-90 s' });
+          s.exercises.push({ muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: ex.name, type: ex.type, pattern: ex.pattern || ex.name, unilateral: !!ex.unilateral, sets: n, reps: `${ex.reps[0]}-${ex.reps[1]}`, rir: ex.type === 'compound' ? '2-3' : '1-2', rest: ex.type === 'compound' ? '2-3 min' : '60-90 s' });
           s.totalSets += n;
         });
       });
@@ -510,13 +534,23 @@
       }
     });
 
-    // DEC-002: en definición, el primer multiarticular de cada día lleva un
-    // top set pesado (no suma series nuevas: la primera de sus series pasa a
-    // ser el top set y el resto queda como back-off al -10% de carga).
+    // DEC-002 / DEC-008: en definición, el primer ejercicio ELEGIBLE del día
+    // lleva un top set pesado (no suma series nuevas: la primera de sus
+    // series pasa a ser el top set y el resto queda como back-off al -10%
+    // de carga). Elegible = multiarticular bilateral con carga libre o
+    // guiada pesada (ACSM 2009, ≥80% 1RM); nunca unilaterales ni máquinas
+    // de press. Si el primero del día no es elegible, el elegible se busca
+    // más adelante y pasa a ordenarse primero. Si ninguno es elegible, ese
+    // día no lleva top set.
     if (p.goal === 'cut') {
       sessions.forEach(s => {
-        const idx = s.exercises.findIndex(e => e.type === 'compound');
+        let idx = s.exercises.findIndex(e => TOPSET_ELIGIBLE_PATTERNS.has(e.pattern));
         if (idx === -1) return;
+        if (idx > 0) {
+          const [chosen] = s.exercises.splice(idx, 1);
+          s.exercises.unshift(chosen);
+          idx = 0;
+        }
         const ex = s.exercises[idx];
         s.exercises[idx] = Object.assign({}, ex, {
           topSet: { reps: '4-6', rir: '1-2' },

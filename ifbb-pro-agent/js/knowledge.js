@@ -282,57 +282,61 @@
   /* Biblioteca de ejercicios: multiarticulares como núcleo y monoarticulares de
    * apoyo (HELMS_TRAIN, ACSM_RT). Los rangos de repeticiones siguen 6-12 como
    * zona principal con 10-15 en aislamiento. */
+  /* DEC-006 (corregido): cada ejercicio lleva un id de "patrón" explícito.
+   * El patrón —no el texto del nombre— decide si dos ejercicios cuentan
+   * como el mismo movimiento base. Las dos búlgaras (cuádriceps y glúteos)
+   * y la búlgara funcional comparten 'split_squat' a propósito. */
   const EXERCISES = {
     chest: [
-      { name: 'Press banca con barra', type: 'compound', reps: [6, 10] },
-      { name: 'Press inclinado con mancuernas', type: 'compound', reps: [8, 12] },
-      { name: 'Fondos en paralelas o press en máquina', type: 'compound', reps: [8, 12] },
-      { name: 'Aperturas en polea o pec-deck', type: 'isolation', reps: [10, 15] },
+      { name: 'Press banca con barra', type: 'compound', reps: [6, 10], pattern: 'bench_press' },
+      { name: 'Press inclinado con mancuernas', type: 'compound', reps: [8, 12], pattern: 'incline_press' },
+      { name: 'Fondos en paralelas o press en máquina', type: 'compound', reps: [8, 12], pattern: 'chest_dip_or_machine' },
+      { name: 'Aperturas en polea o pec-deck', type: 'isolation', reps: [10, 15], pattern: 'chest_fly' },
     ],
     back: [
-      { name: 'Dominadas o jalón al pecho', type: 'compound', reps: [6, 10] },
-      { name: 'Remo con barra o remo pendlay', type: 'compound', reps: [6, 10] },
-      { name: 'Remo en polea baja o máquina', type: 'compound', reps: [8, 12] },
-      { name: 'Pullover en polea', type: 'isolation', reps: [10, 15] },
+      { name: 'Dominadas o jalón al pecho', type: 'compound', reps: [6, 10], pattern: 'vertical_pull' },
+      { name: 'Remo con barra o remo pendlay', type: 'compound', reps: [6, 10], pattern: 'row_barbell' },
+      { name: 'Remo en polea baja o máquina', type: 'compound', reps: [8, 12], pattern: 'row_cable' },
+      { name: 'Pullover en polea', type: 'isolation', reps: [10, 15], pattern: 'pullover' },
     ],
     shoulders: [
-      { name: 'Press militar con barra o mancuernas', type: 'compound', reps: [6, 10] },
-      { name: 'Elevaciones laterales con mancuerna', type: 'isolation', reps: [10, 15] },
-      { name: 'Elevaciones laterales en polea', type: 'isolation', reps: [12, 15] },
-      { name: 'Face pull / pájaros (deltoides posterior)', type: 'isolation', reps: [12, 15] },
+      { name: 'Press militar con barra o mancuernas', type: 'compound', reps: [6, 10], pattern: 'shoulder_press' },
+      { name: 'Elevaciones laterales con mancuerna', type: 'isolation', reps: [10, 15], pattern: 'lateral_raise' },
+      { name: 'Elevaciones laterales en polea', type: 'isolation', reps: [12, 15], pattern: 'lateral_raise' },
+      { name: 'Face pull / pájaros (deltoides posterior)', type: 'isolation', reps: [12, 15], pattern: 'rear_delt' },
     ],
     quads: [
-      { name: 'Sentadilla trasera o sentadilla en hack', type: 'compound', reps: [6, 10] },
-      { name: 'Prensa de piernas', type: 'compound', reps: [8, 12] },
-      { name: 'Zancadas o sentadilla búlgara', type: 'compound', reps: [8, 12], unilateral: true },
-      { name: 'Extensión de cuádriceps', type: 'isolation', reps: [10, 15] },
+      { name: 'Sentadilla trasera o sentadilla en hack', type: 'compound', reps: [6, 10], pattern: 'squat_bilateral' },
+      { name: 'Prensa de piernas', type: 'compound', reps: [8, 12], pattern: 'leg_press' },
+      { name: 'Zancadas o sentadilla búlgara', type: 'compound', reps: [8, 12], unilateral: true, pattern: 'split_squat' },
+      { name: 'Extensión de cuádriceps', type: 'isolation', reps: [10, 15], pattern: 'knee_extension' },
     ],
     hamstrings: [
-      { name: 'Peso muerto rumano', type: 'compound', reps: [6, 10] },
-      { name: 'Curl femoral tumbado o sentado', type: 'isolation', reps: [10, 15] },
+      { name: 'Peso muerto rumano', type: 'compound', reps: [6, 10], pattern: 'hinge' },
+      { name: 'Curl femoral tumbado o sentado', type: 'isolation', reps: [10, 15], pattern: 'leg_curl' },
     ],
     glutes: [
-      { name: 'Hip thrust con barra', type: 'compound', reps: [6, 10] },
-      { name: 'Sentadilla búlgara con énfasis en cadera', type: 'compound', reps: [8, 12], unilateral: true },
-      { name: 'Abducción de cadera en máquina', type: 'isolation', reps: [12, 15] },
-      { name: 'Patada de glúteo en polea', type: 'isolation', reps: [12, 15], unilateral: true },
+      { name: 'Hip thrust con barra', type: 'compound', reps: [6, 10], pattern: 'hip_thrust' },
+      { name: 'Sentadilla búlgara con énfasis en cadera', type: 'compound', reps: [8, 12], unilateral: true, pattern: 'split_squat' },
+      { name: 'Abducción de cadera en máquina', type: 'isolation', reps: [12, 15], pattern: 'hip_abduction' },
+      { name: 'Patada de glúteo en polea', type: 'isolation', reps: [12, 15], unilateral: true, pattern: 'glute_kickback' },
     ],
     calves: [
-      { name: 'Elevación de talones de pie', type: 'isolation', reps: [8, 12] },
-      { name: 'Elevación de talones sentado', type: 'isolation', reps: [12, 15] },
+      { name: 'Elevación de talones de pie', type: 'isolation', reps: [8, 12], pattern: 'calf_raise_standing' },
+      { name: 'Elevación de talones sentado', type: 'isolation', reps: [12, 15], pattern: 'calf_raise_seated' },
     ],
     biceps: [
-      { name: 'Curl con barra o barra Z', type: 'isolation', reps: [8, 12] },
-      { name: 'Curl inclinado con mancuernas', type: 'isolation', reps: [10, 15] },
+      { name: 'Curl con barra o barra Z', type: 'isolation', reps: [8, 12], pattern: 'curl_barbell' },
+      { name: 'Curl inclinado con mancuernas', type: 'isolation', reps: [10, 15], pattern: 'curl_incline' },
     ],
     triceps: [
-      { name: 'Press cerrado o fondos', type: 'compound', reps: [6, 10] },
-      { name: 'Extensión de tríceps en polea', type: 'isolation', reps: [10, 15] },
+      { name: 'Press cerrado o fondos', type: 'compound', reps: [6, 10], pattern: 'close_grip_press' },
+      { name: 'Extensión de tríceps en polea', type: 'isolation', reps: [10, 15], pattern: 'triceps_extension' },
     ],
     abs: [
-      { name: 'Crunch en polea o rueda abdominal', type: 'isolation', reps: [10, 15] },
-      { name: 'Elevaciones de piernas colgado', type: 'isolation', reps: [10, 15] },
-      { name: 'Vacuum abdominal (Classic / Physique)', type: 'isolation', reps: [5, 8] },
+      { name: 'Crunch en polea o rueda abdominal', type: 'isolation', reps: [10, 15], pattern: 'ab_flexion' },
+      { name: 'Elevaciones de piernas colgado', type: 'isolation', reps: [10, 15], pattern: 'leg_raise' },
+      { name: 'Vacuum abdominal (Classic / Physique)', type: 'isolation', reps: [5, 8], pattern: 'vacuum' },
     ],
   };
 
@@ -341,9 +345,9 @@
    * respaldo específico en la literatura citada). */
   const FUNCTIONAL_EXERCISES = {
     quads: [
-      { name: 'Sentadilla búlgara con mancuernas', type: 'compound', reps: [8, 12], unilateral: true },
-      { name: 'Step-up con carga', type: 'compound', reps: [8, 12], unilateral: true },
-      { name: 'Paseo del granjero', type: 'compound', reps: [20, 40] },
+      { name: 'Sentadilla búlgara con mancuernas', type: 'compound', reps: [8, 12], unilateral: true, pattern: 'split_squat' },
+      { name: 'Step-up con carga', type: 'compound', reps: [8, 12], unilateral: true, pattern: 'step_up' },
+      { name: 'Paseo del granjero', type: 'compound', reps: [20, 40], pattern: 'loaded_carry' },
     ],
   };
 
