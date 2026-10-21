@@ -30,7 +30,7 @@ Este archivo es la fuente de verdad de la lógica de negocio. Antes de cambiar c
 - Respaldo: [Criterio].
 - Test: ninguna sesión supera el tope y ningún multiarticular desaparece.
 
-**Estado: pendiente.**
+**Estado: revertida.** Motivo: se probaron dos algoritmos (recorte+reubicación en una sola pasada, y luego en dos fases separando "calcular recortes" de "reubicar en días con espacio libre). El segundo cumple el propio criterio de DEC-003 (ninguna sesión supera el tope, ningún multiarticular desaparece) para el perfil de ejemplo, pero expone un problema real: cuando un grupo muscular pequeño se entrena en 2 días y AMBOS están al límite de series, ese grupo pierde series de forma permanente esa semana (nadie tiene sitio para recibirlas), lo que puede dejar el total semanal mostrado (`weeklySets`) sin corresponder con lo que realmente aparece en las sesiones. Esto se vio en rutinas de cuerpo completo (3 días) y en divisiones con mucho énfasis en pierna (ej. Wellness). Arreglarlo bien (por ejemplo, subiendo el tope mínimo según el volumen real de la división, o definiendo qué hacer cuando no hay ningún día con espacio) es una decisión de producto, no un ajuste de algoritmo de dos intentos. Se necesita una re-especificación antes de reintentar: ¿el tope debe poder ceder (mostrar aviso) en vez de perder series silenciosamente? ¿Debe haber un piso de series para grupos pequeños aunque se supere el tope?
 
 ## DEC-004 · Aviso de inconsistencia en % de grasa
 - Si hay % de grasa ingresado Y circunferencias, calcular también el % por fórmula Navy. Si la diferencia es mayor a 4 puntos, mostrar un aviso no bloqueante con ambos valores.
