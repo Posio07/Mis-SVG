@@ -229,7 +229,9 @@ li { margin-bottom: .25rem; }
 .sm-last.sm-last-top { border-color: var(--disco-rojo); }
 .sm-last .v { color: var(--tiza); font-weight: 600; }
 
-.sm-set { display: flex; align-items: center; gap: .6rem; background: var(--superficie); border: 1px solid var(--borde); border-radius: 12px; padding: .6rem .7rem; margin-bottom: .6rem; }
+.sm-set { display: flex; flex-direction: column; gap: .5rem; background: var(--superficie); border: 1px solid var(--borde); border-radius: 12px; padding: .6rem .7rem; margin-bottom: .6rem; }
+.sm-set-row { display: flex; align-items: center; gap: .6rem; }
+.sm-pain { border-top: 1px dashed var(--borde); padding-top: .5rem; }
 .sm-set.done { border-color: var(--exito); opacity: .7; }
 .sm-set .done-btn .check-draw { width: 1.3rem; height: 1.3rem; stroke-dasharray: 24; stroke-dashoffset: 24; }
 @media (prefers-reduced-motion: no-preference) {

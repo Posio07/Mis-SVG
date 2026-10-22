@@ -846,18 +846,49 @@
     return Math.round(seconds / 60);
   }
 
-  function buildSmExercises(session, short) {
+  // DEC-009 · Capa 3: ¿este grupo muscular queda involucrado por alguna de
+  // las zonas de lesión declaradas? (tenga o no diagnóstico). Más amplio
+  // que "el patrón excluido": un ejercicio que YA es el sustituto (porque
+  // el excluido ni siquiera llega a aparecer en el plan) sigue
+  // involucrando la zona y por eso también lleva escala de dolor.
+  function injuryAffectsMuscle(muscle, zones) {
+    return zones.some(z => KNOWLEDGE.INJURY_EXCLUSIONS[z] && KNOWLEDGE.INJURY_EXCLUSIONS[z][muscle]);
+  }
+  // Alternativa dentro del mismo grupo muscular para un ejercicio marcado
+  // por dolor: el siguiente de la lista del catálogo que no esté excluido
+  // por las zonas declaradas ni sea el propio ejercicio marcado.
+  function findPainSubstitute(pattern, muscle, zones, profile) {
+    const lib = KNOWLEDGE.EXERCISES[muscle] || [];
+    const excluded = new Set([pattern]);
+    zones.forEach(z => { const map = KNOWLEDGE.INJURY_EXCLUSIONS[z]; if (map && map[muscle]) map[muscle].forEach(p => excluded.add(p)); });
+    const flags = (profile.painFlags || {});
+    return lib.find(ex => !excluded.has(ex.pattern) && !(flags[ex.pattern] && flags[ex.pattern].flagged) && (!ex.injuryOnly || zones.indexOf(ex.injuryOnly) !== -1));
+  }
+
+  function buildSmExercises(session, short, profile) {
     let list = session.exercises;
     if (short) list = list.filter(e => e.type === 'compound').slice(0, 2);
+    const zones = ((profile.data.health && profile.data.health.injuries) || []).map(i => i.zone);
+    const flags = profile.painFlags || {};
     return list.map(e => {
-      const sets = [];
-      if (e.topSet) {
-        sets.push({ setType: 'top', setNumber: 1, repsLabel: e.topSet.reps, restLabel: '3 min' });
-        for (let i = 0; i < (e.backoffSets || 0); i++) sets.push({ setType: 'backoff', setNumber: i + 1, repsLabel: e.reps, restLabel: e.rest });
-      } else {
-        for (let i = 0; i < e.sets; i++) sets.push({ setType: 'normal', setNumber: i + 1, repsLabel: e.reps, restLabel: e.rest });
+      let ex = e, substitutedFrom = null;
+      const flag = flags[e.pattern];
+      if (flag && flag.flagged) {
+        const alt = findPainSubstitute(e.pattern, e.muscle, zones, profile);
+        if (alt) { substitutedFrom = e.name; ex = Object.assign({}, e, { name: alt.name, pattern: alt.pattern, reps: `${alt.reps[0]}-${alt.reps[1]}`, topSet: null, backoffSets: 0 }); }
       }
-      return { name: e.name, muscle: e.muscle, muscleLabel: e.muscleLabel, type: e.type, pattern: e.pattern, unilateral: e.unilateral, durationMin: exerciseDurationMin(e), sets };
+      const sets = [];
+      if (ex.topSet) {
+        sets.push({ setType: 'top', setNumber: 1, repsLabel: ex.topSet.reps, restLabel: '3 min' });
+        for (let i = 0; i < (ex.backoffSets || 0); i++) sets.push({ setType: 'backoff', setNumber: i + 1, repsLabel: ex.reps, restLabel: ex.rest });
+      } else {
+        for (let i = 0; i < ex.sets; i++) sets.push({ setType: 'normal', setNumber: i + 1, repsLabel: ex.reps, restLabel: ex.rest });
+      }
+      return {
+        name: ex.name, muscle: ex.muscle, muscleLabel: ex.muscleLabel, type: ex.type, pattern: ex.pattern, unilateral: ex.unilateral,
+        durationMin: exerciseDurationMin(ex), sets, substitutedFrom,
+        painScale: injuryAffectsMuscle(ex.muscle, zones),
+      };
     });
   }
 
@@ -868,12 +899,12 @@
 
   function startSessionMode(profile, plan, dayIndex, short) {
     const session = plan.training.sessions[dayIndex];
-    const exercises = buildSmExercises(session, short);
+    const exercises = buildSmExercises(session, short, profile);
     if (!exercises.length) { toast('Este día no tiene multiarticulares para la versión corta.'); return; }
     sm = {
       profileId: profile.id, sessionId: uid(), dayIndex, dayName: session.name, short,
       exercises, exIndex: 0, startedAt: Date.now(), finished: false,
-      values: exercises.map(e => e.sets.map(() => ({ weight: '', reps: '', done: false }))),
+      values: exercises.map(e => e.sets.map(() => ({ weight: '', reps: '', done: false, pain: '' }))),
     };
     requestWakeLock();
     let root = document.getElementById('session-mode-root');
@@ -917,12 +948,13 @@
         <div class="session-mode-body">
           <h2 class="sm-exname">${esc(ex.name)}</h2>
           <div class="sm-exmeta">${esc(ex.muscleLabel)} ${sm.short ? `· ~${ex.durationMin} min` : ''}</div>
+          ${ex.substitutedFrom ? `<div class="alert warn">Reemplaza a "${esc(ex.substitutedFrom)}" por el dolor registrado la vez pasada. Te sugerimos consultar a un profesional.</div>` : ''}
           ${htmlExerciseImage(ex)}
           ${last ? `<div class="sm-last ${last.sets.some(s => s.setType === 'top') ? 'sm-last-top' : ''}">
             <b>Última vez</b> (${fmtDate(last.date)}): ${last.sets.map(s => `${s.setType === 'top' ? icon('trophy') + ' ' : ''}<span class="v">${n1(s.weight)} ${profile.data.plateUnit || 'kg'} × ${s.reps}</span>`).join(' · ')}
           </div>` : `<div class="sm-last">Primera vez que registrás este ejercicio.</div>`}
           ${htmlPlateBarsForExercise(profile, ex, last)}
-          ${ex.sets.map((st, i) => htmlSmSet(st, i, vals[i], profile.data.plateUnit || 'kg')).join('')}
+          ${ex.sets.map((st, i) => htmlSmSet(st, i, vals[i], profile.data.plateUnit || 'kg', ex.painScale)).join('')}
         </div>
         <div class="session-mode-foot">
           <button class="btn btn-icon" id="sm-prev" ${sm.exIndex === 0 ? 'disabled' : ''} aria-label="Ejercicio anterior">‹</button>
@@ -933,13 +965,16 @@
     wireSessionMode(profile);
   }
 
-  function htmlSmSet(st, i, v, unit) {
+  function htmlSmSet(st, i, v, unit, painScale) {
     const label = { top: 'Top set', backoff: 'Back-off', normal: `Serie ${st.setNumber}` }[st.setType];
     return `<div class="sm-set ${v.done ? 'done' : ''}" data-set="${i}">
-      <div class="idx">${label === `Serie ${st.setNumber}` ? st.setNumber : (st.setType === 'top' ? icon('trophy') : '↓')}</div>
-      <div class="fieldwrap"><input type="number" inputmode="decimal" placeholder="${unit}" value="${v.weight || ''}" data-sm-weight="${i}" ${v.done ? 'disabled' : ''}><div class="unit">peso (${unit})</div></div>
-      <div class="fieldwrap"><input type="number" inputmode="numeric" placeholder="${st.repsLabel}" value="${v.reps || ''}" data-sm-reps="${i}" ${v.done ? 'disabled' : ''}><div class="unit">reps (obj. ${esc(st.repsLabel)})</div></div>
-      <button class="btn ${v.done ? '' : 'btn-primary'} done-btn" data-sm-done="${i}" ${v.done ? 'disabled' : ''}>${v.done ? icon('check', 'check-draw') : 'Hecha'}</button>
+      <div class="sm-set-row">
+        <div class="idx">${label === `Serie ${st.setNumber}` ? st.setNumber : (st.setType === 'top' ? icon('trophy') : '↓')}</div>
+        <div class="fieldwrap"><input type="number" inputmode="decimal" placeholder="${unit}" value="${v.weight || ''}" data-sm-weight="${i}" ${v.done ? 'disabled' : ''}><div class="unit">peso (${unit})</div></div>
+        <div class="fieldwrap"><input type="number" inputmode="numeric" placeholder="${st.repsLabel}" value="${v.reps || ''}" data-sm-reps="${i}" ${v.done ? 'disabled' : ''}><div class="unit">reps (obj. ${esc(st.repsLabel)})</div></div>
+        <button class="btn ${v.done ? '' : 'btn-primary'} done-btn" data-sm-done="${i}" ${v.done ? 'disabled' : ''}>${v.done ? icon('check', 'check-draw') : 'Hecha'}</button>
+      </div>
+      ${painScale ? `<div class="fieldwrap sm-pain"><input type="number" inputmode="numeric" min="0" max="10" placeholder="0-10" value="${v.pain === '' || v.pain == null ? '' : v.pain}" data-sm-pain="${i}" ${v.done ? 'disabled' : ''}><div class="unit">dolor en esta serie (0-10)</div></div>` : ''}
     </div>`;
   }
 
@@ -956,7 +991,24 @@
     const nextArrow = $('#sm-next-arrow'); if (nextArrow) nextArrow.onclick = () => { if (sm.exIndex < sm.exercises.length - 1) { sm.exIndex++; renderSessionMode(profile); } };
     root.querySelectorAll('[data-sm-weight]').forEach(inp => inp.oninput = () => { sm.values[sm.exIndex][Number(inp.dataset.smWeight)].weight = inp.value; });
     root.querySelectorAll('[data-sm-reps]').forEach(inp => inp.oninput = () => { sm.values[sm.exIndex][Number(inp.dataset.smReps)].reps = inp.value; });
+    root.querySelectorAll('[data-sm-pain]').forEach(inp => inp.oninput = () => { sm.values[sm.exIndex][Number(inp.dataset.smPain)].pain = inp.value; });
     root.querySelectorAll('[data-sm-done]').forEach(btn => btn.onclick = () => smLogSet(profile, Number(btn.dataset.smDone)));
+  }
+
+  // DEC-009: marca/desmarca un ejercicio para sustituir según el dolor
+  // registrado. Dolor >5 marca (o reconfirma la marca). Dolor ≤5 solo
+  // desmarca después de 2 sesiones DISTINTAS seguidas sin pasarse de 5.
+  function logPain(profile, pattern, pain) {
+    profile.painFlags = profile.painFlags || {};
+    const rec = profile.painFlags[pattern] || { flagged: false, cleanStreak: 0, lastSessionId: null };
+    const newSession = rec.lastSessionId !== sm.sessionId;
+    if (pain > 5) { rec.flagged = true; rec.cleanStreak = 0; }
+    else if (rec.flagged && newSession) {
+      rec.cleanStreak = (rec.cleanStreak || 0) + 1;
+      if (rec.cleanStreak >= 2) { rec.flagged = false; rec.cleanStreak = 0; }
+    }
+    rec.lastSessionId = sm.sessionId;
+    profile.painFlags[pattern] = rec;
   }
 
   function smLogSet(profile, setIdx) {
@@ -965,11 +1017,13 @@
     if (!reps || reps <= 0) { toast('Poné las repeticiones hechas.'); return; }
     const weight = parseFloat(v.weight) || 0;
     v.weight = weight; v.reps = reps; v.done = true;
+    let pain = null;
+    if (ex.painScale) { pain = v.pain === '' || v.pain == null ? null : Math.min(10, Math.max(0, parseInt(v.pain, 10))); v.pain = pain; if (pain != null) logPain(profile, ex.pattern, pain); }
     profile.workouts = profile.workouts || [];
     profile.workouts.push({
       sessionId: sm.sessionId, date: todayIso(), dayIndex: sm.dayIndex, dayName: sm.dayName,
       exercise: ex.name, muscle: ex.muscle, setType: st.setType, setNumber: st.setNumber,
-      weight, reps, short: sm.short, savedAt: Date.now(),
+      weight, reps, pain, short: sm.short, savedAt: Date.now(),
     });
     profile.updatedAt = todayIso();
     save();
