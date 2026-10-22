@@ -966,30 +966,79 @@
     const ov = document.getElementById('sm-timer'); if (ov) ov.remove();
   }
 
+  function priorTopWeightFor(profile, exerciseName) {
+    const all = (profile.workouts || []).filter(w => w.exercise === exerciseName && w.setType === 'top' && w.sessionId !== sm.sessionId);
+    if (!all.length) return null;
+    let last = all[0];
+    all.forEach(w => { if (w.savedAt > last.savedAt) last = w; });
+    return last.weight;
+  }
+
   function htmlSmSummary(profile) {
     const flatVals = sm.values.flat();
     const doneCount = flatVals.filter(v => v.done).length;
+    const totalCount = flatVals.length;
     const pending = sm.exercises.filter((e, i) => sm.values[i].some(v => !v.done)).map(e => e.name);
     const durationMin = Math.max(1, Math.round((Date.now() - sm.startedAt) / 60000));
     const topSets = [];
-    sm.exercises.forEach((e, i) => e.sets.forEach((st, j) => { const v = sm.values[i][j]; if (st.setType === 'top' && v.done) topSets.push({ name: e.name, weight: v.weight, reps: v.reps }); }));
+    sm.exercises.forEach((e, i) => e.sets.forEach((st, j) => {
+      const v = sm.values[i][j];
+      if (st.setType === 'top' && v.done) topSets.push({ name: e.name, weight: v.weight, reps: v.reps, prior: priorTopWeightFor(profile, e.name) });
+    }));
+    const topSetRow = t => {
+      let cmp = '';
+      if (t.prior != null) {
+        const diff = round2(t.weight - t.prior);
+        const dir = diff > 0 ? 'up' : diff < 0 ? 'down' : 'flat';
+        const ic = dir === 'up' ? 'arrow-up' : dir === 'down' ? 'arrow-down' : 'arrow-flat';
+        cmp = `<span class="topset-cmp cmp-${dir}">${icon(ic)} ${diff === 0 ? 'igual' : (diff > 0 ? '+' : '') + n1(diff) + ' kg'}</span>`;
+      }
+      return `<li><b>${esc(t.name)}</b>: ${n1(t.weight)} kg × ${t.reps} ${cmp}</li>`;
+    };
     return `<div class="session-mode">
       <div class="session-mode-head"><div></div><div class="prog">Resumen de la sesión</div><div></div></div>
       <div class="session-mode-body">
         <div class="card accent">
           <h2>${esc(sm.dayName)} ${sm.short ? '· versión corta' : ''}</h2>
           <div class="grid">
-            <div class="stat"><div class="v">${doneCount}</div><div class="l">series hechas</div></div>
+            <div class="stat"><div class="v">${doneCount}/${totalCount}</div><div class="l">series hechas</div></div>
             <div class="stat"><div class="v">${durationMin}</div><div class="l">min reales</div></div>
           </div>
         </div>
-        ${topSets.length ? `<div class="card"><h3>Top sets del día</h3><ul>${topSets.map(t => `<li><b>${esc(t.name)}</b>: ${n1(t.weight)} kg × ${t.reps}</li>`).join('')}</ul></div>` : ''}
+        ${topSets.length ? `<div class="card"><h3>Top sets del día</h3><ul>${topSets.map(topSetRow).join('')}</ul></div>` : ''}
         ${pending.length ? `<div class="card"><h3>Ejercicios con series sin terminar</h3><ul>${pending.map(n => `<li>${esc(n)}</li>`).join('')}</ul></div>` : '<div class="card"><p class="muted">Todas las series quedaron registradas. ¡Bien ahí!</p></div>'}
         <button class="btn btn-primary btn-block btn-lg" id="sm-back-to-plan">Volver al plan</button>
       </div>
     </div>`;
   }
   function wireSmSummary() { $('#sm-back-to-plan').onclick = () => { endSessionMode(); render(); }; }
+
+  /* Fase 6: encabezado de Progreso con 4 métricas derivadas del log (vista
+   * pura, no participan de ningún cálculo del plan). */
+  function htmlProgressHeader(log, plan) {
+    const t = plan.targets;
+    let avg7 = null, totalChange = null, realRate = null;
+    if (log.length) {
+      const lastDate = new Date(log[log.length - 1].date + 'T00:00:00').getTime();
+      const windowStart = lastDate - 6 * 86400000;
+      const inWindow = log.filter(e => new Date(e.date + 'T00:00:00').getTime() >= windowStart);
+      avg7 = inWindow.reduce((s, e) => s + e.weightKg, 0) / inWindow.length;
+    }
+    if (log.length >= 2) {
+      totalChange = log[log.length - 1].weightKg - log[0].weightKg;
+      const days = (new Date(log[log.length - 1].date + 'T00:00:00') - new Date(log[0].date + 'T00:00:00')) / 86400000;
+      if (days > 0) realRate = totalChange / (days / 7);
+    }
+    const fmtKg = v => v == null ? '—' : `${v > 0 ? '+' : ''}${n1(v)} kg`;
+    const fmtRate = v => v == null ? '—' : `${v > 0 ? '+' : ''}${n2(v)} kg/sem`;
+    const previstoLabel = plan.input.goal === 'maintain' ? 'previsto 0' : `previsto ${plan.input.goal === 'cut' ? '−' : '+'}${n2(Math.abs(t.rateKg))} kg/sem`;
+    return `<div class="grid" style="margin-top:.8rem">
+      <div class="stat"><div class="v">${avg7 != null ? n1(avg7) + ' kg' : '—'}</div><div class="l">peso actual</div><div class="s">promedio 7 días</div></div>
+      <div class="stat"><div class="v">${fmtKg(totalChange)}</div><div class="l">cambio desde el inicio</div></div>
+      <div class="stat"><div class="v">${fmtRate(realRate)}</div><div class="l">ritmo real</div><div class="s">${previstoLabel}</div></div>
+      <div class="stat"><div class="v">${plan.input.goal === 'maintain' ? '—' : n0(t.weeksNeeded) + ' sem'}</div><div class="l">estimado al objetivo</div></div>
+    </div>`;
+  }
 
   /* ---------- Progreso ---------- */
   function renderProgress() {
@@ -1003,6 +1052,7 @@
     view.innerHTML = `
       <div class="card accent">
         <h2>Progreso · ${esc(p.data.name)}</h2>
+        ${htmlProgressHeader(log, plan)}
         <form id="log-form">
           <div class="row2">
             <div><label>Peso (kg)</label><input name="weightKg" type="number" step="0.1" inputmode="decimal" required autofocus></div>

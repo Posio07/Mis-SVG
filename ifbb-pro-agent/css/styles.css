@@ -310,3 +310,10 @@ li { margin-bottom: .25rem; }
 
 .chart .dot-short { fill: none; stroke: var(--disco-amarillo); stroke-width: 2; }
 
+/* Fase 6: comparación del top set del día contra el anterior. */
+.topset-cmp { display: inline-flex; align-items: center; gap: .2rem; font-weight: 600; font-size: .85rem; white-space: nowrap; }
+.topset-cmp .icon { width: .9rem; height: .9rem; }
+.topset-cmp.cmp-up { color: var(--exito); }
+.topset-cmp.cmp-down { color: var(--peligro); }
+.topset-cmp.cmp-flat { color: var(--acero); }
+
