@@ -17,9 +17,9 @@
   --disco-blanco: #E8E6E1;
   --disco-gris: #8C9399;
   --borde: #3A4046;
-  --peligro: #D9544B;
+  --peligro: #E27B74;
   --aviso: #D9A23B;
-  --info-ui: #4C8FD1;
+  --info-ui: #639ED7;
   --exito: #4FA868;
   --macro-proteina: #4FA868;
   --macro-carbohidrato: #4C8FD1;
@@ -113,8 +113,9 @@ td.num { text-align: right; white-space: nowrap; }
 .session-head { display: flex; justify-content: space-between; align-items: center; gap: .6rem; padding: .8rem .9rem; cursor: pointer; background: none; border: 0; width: 100%; text-align: left; color: var(--tiza); min-height: 44px; font-family: var(--font-body); }
 .session-head h4 { font-family: var(--font-display); font-size: 1.15rem; margin: 0; font-weight: 600; }
 .session-head .meta { font-size: .78rem; color: var(--acero); margin-top: .1rem; }
-.session-head .chev { color: var(--acero); transition: transform .15s ease; flex-shrink: 0; }
+.session-head .chev { color: var(--acero); flex-shrink: 0; }
 .session-head[aria-expanded="true"] .chev { transform: rotate(180deg); }
+@media (prefers-reduced-motion: no-preference) { .session-head .chev { transition: transform .15s ease; } }
 .session-body { padding: 0 .9rem .9rem; }
 .session-body[hidden] { display: none; }
 
