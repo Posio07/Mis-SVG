@@ -20,7 +20,7 @@
   --peligro: #E27B74;
   --aviso: #D9A23B;
   --info-ui: #639ED7;
-  --exito: #4FA868;
+  --exito: #5DAF74;
   --macro-proteina: #4FA868;
   --macro-carbohidrato: #4C8FD1;
   --macro-grasa: #C98A3A;
@@ -28,8 +28,13 @@
   --tabbar-h: 64px;
   --font-display: 'Big Shoulders Display', system-ui, -apple-system, sans-serif;
   --font-body: 'Source Sans 3', system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --dur-rapida: 150ms;
+  --dur-media: 250ms;
+  --dur-lenta: 600ms;
+  --ease-salida: cubic-bezier(.2,.8,.2,1);
 }
 * { box-sizing: border-box; }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: var(--dur-rapida); }
 html, body { margin: 0; padding: 0; background: var(--grafito); color: var(--tiza); font: 16px/1.45 var(--font-body); -webkit-text-size-adjust: 100%; }
 body { padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom)); min-height: 100vh; }
 h1, h2, h3, h4 { margin: 0 0 .4em; line-height: 1.2; font-weight: 700; }
@@ -41,6 +46,11 @@ small, .muted { color: var(--acero); }
 hr { border: 0; border-top: 1px solid var(--borde); margin: 1rem 0; }
 :focus-visible { outline: 3px solid var(--disco-amarillo); outline-offset: 2px; }
 
+/* Sistema de íconos: sprite propio en index.html (grilla 24px, trazo 2px),
+ * sin librerías externas. Todo ícono hereda tamaño y color del texto que
+ * lo acompaña; los paths sin fill propio se dibujan solo con el trazo. */
+.icon { width: 1em; height: 1em; display: inline-block; vertical-align: -0.2em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+
 .topbar { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: calc(.6rem + env(safe-area-inset-top)) 1rem .6rem; background: var(--superficie); border-bottom: 1px solid var(--borde); }
 .brand { display: flex; align-items: center; gap: .6rem; }
 .brand h1 { font-size: 1.05rem; margin: 0; }
@@ -49,9 +59,12 @@ hr { border: 0; border-top: 1px solid var(--borde); margin: 1rem 0; }
 .view { padding: 1rem; max-width: 720px; margin: 0 auto; }
 
 .tabbar { position: fixed; bottom: 0; left: 0; right: 0; height: calc(var(--tabbar-h) + env(safe-area-inset-bottom)); padding-bottom: env(safe-area-inset-bottom); display: flex; background: var(--superficie); border-top: 1px solid var(--borde); z-index: 10; }
-.tab { flex: 1; background: none; border: 0; color: var(--acero); font-size: .7rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; cursor: pointer; min-height: 44px; }
-.tab .ico { font-size: 1.3rem; }
+.tab { flex: 1; background: none; border: 0; color: var(--acero); font-size: .7rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; cursor: pointer; min-height: 44px; position: relative; }
+.tab .icon { width: 22px; height: 22px; }
 .tab.active { color: var(--disco-amarillo); }
+.tab::before { content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 28px; height: 3px; border-radius: 0 0 3px 3px; background: transparent; }
+.tab.active::before { background: var(--disco-amarillo); }
+@media (prefers-reduced-motion: no-preference) { .tab::before { transition: background-color var(--dur-rapida) ease; } }
 
 .card { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radius); padding: 1rem; margin-bottom: 1rem; }
 .card.accent { border-color: var(--disco-amarillo); }
@@ -110,37 +123,58 @@ td.num { text-align: right; white-space: nowrap; }
 /* Sesiones de entreno: la barra de color a la izquierda identifica el
  * tipo de ejercicio (rojo top set, azul multiarticular, verde aislamiento). */
 .session { border: 1px solid var(--borde); border-radius: 12px; margin-bottom: .7rem; background: var(--superficie); overflow: hidden; }
-.session-head { display: flex; justify-content: space-between; align-items: center; gap: .6rem; padding: .8rem .9rem; cursor: pointer; background: none; border: 0; width: 100%; text-align: left; color: var(--tiza); min-height: 44px; font-family: var(--font-body); }
-.session-head h4 { font-family: var(--font-display); font-size: 1.15rem; margin: 0; font-weight: 600; }
-.session-head .meta { font-size: .78rem; color: var(--acero); margin-top: .1rem; }
-.session-head .chev { color: var(--acero); flex-shrink: 0; }
+.session-head { display: flex; justify-content: space-between; align-items: flex-start; gap: .6rem; padding: .8rem .9rem; cursor: pointer; background: none; border: 0; width: 100%; text-align: left; color: var(--tiza); min-height: 44px; font-family: var(--font-body); }
+/* El mismo inset que el texto de .ex-row (borde de 4px + padding de .7rem
+ * de .ex-main), para que título, métricas y ejercicios compartan margen. */
+.session-head-main { flex: 1; min-width: 0; padding-left: calc(4px + .7rem); }
+.session-head h4 { font-family: var(--font-display); font-size: 1.15rem; margin: 0; font-weight: 600; display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.day-tag { font-family: var(--font-body); font-size: .68rem; font-weight: 700; border: 1.5px solid var(--disco-amarillo); color: var(--disco-amarillo); border-radius: 999px; padding: .05rem .55rem; }
+.session-metrics { display: flex; gap: 1.1rem; margin-top: .35rem; align-items: baseline; }
+.session-metrics .metric { font-size: .78rem; color: var(--acero); display: inline-flex; align-items: center; gap: .3rem; }
+.session-metrics .metric b { font-family: var(--font-display); font-size: 1.3rem; color: var(--tiza); font-weight: 600; }
+.session-metrics .metric .icon { width: 1rem; height: 1rem; }
+.session-bar { display: flex; height: 5px; border-radius: 3px; overflow: hidden; margin-top: .55rem; background: var(--superficie-2); }
+.session-bar span { height: 100%; }
+.session-bar .top { background: var(--disco-rojo); }
+.session-bar .compound { background: var(--disco-azul); }
+.session-bar .isolation { background: var(--disco-verde); }
+.session-muscles { display: flex; gap: .35rem; flex-wrap: wrap; margin-top: .55rem; }
+.session-muscles .chip { font-size: .7rem; padding: .15rem .55rem; border-radius: 999px; background: var(--superficie); border: 1px solid var(--acero); color: var(--acero); }
+.session-head .chev { color: var(--acero); flex-shrink: 0; width: 20px; height: 20px; margin-top: .1rem; }
 .session-head[aria-expanded="true"] .chev { transform: rotate(180deg); }
-@media (prefers-reduced-motion: no-preference) { .session-head .chev { transition: transform .15s ease; } }
-.session-body { padding: 0 .9rem .9rem; }
-.session-body[hidden] { display: none; }
+@media (prefers-reduced-motion: no-preference) { .session-head .chev { transition: transform var(--dur-rapida) ease; } }
+/* Apertura/cierre de día animado con la técnica grid-rows 0fr->1fr (altura
+ * auto animable sin medir en JS) + opacidad. El contenido vive en un div
+ * interno con overflow:hidden; el de afuera es el que cambia de fila.
+ * El estado interactivo (foco/tab) se controla con `inert`, no con
+ * `hidden`, para poder animar el colapso en vez de cortarlo de golpe. */
+.session-body { display: grid; grid-template-rows: 0fr; opacity: 0; }
+.session-body > .session-body-inner { overflow: hidden; min-height: 0; padding: 0 .9rem .9rem; }
+.session-head[aria-expanded="true"] + .session-body { grid-template-rows: 1fr; opacity: 1; }
+@media (prefers-reduced-motion: no-preference) {
+  .session-body { transition: grid-template-rows var(--dur-media) var(--ease-salida), opacity var(--dur-media) var(--ease-salida); }
+}
 
-.ex-row { display: flex; border-left: 4px solid var(--borde); border-radius: 8px; margin-bottom: .4rem; background: var(--superficie-2); overflow: hidden; }
+/* Filas con separador fino sobre una única superficie compartida (en vez
+ * de una tarjeta propia por ejercicio): más compacto, misma barra de
+ * color a la izquierda por tipo de serie. */
+.ex-list { background: var(--superficie-2); border-radius: 10px; margin-top: .6rem; overflow: hidden; }
+.ex-row { display: flex; border-left: 4px solid var(--borde); border-bottom: 1px solid var(--borde); }
+.ex-list .ex-group:last-child .ex-row:last-child { border-bottom: 0; }
 .ex-row.type-top { border-left-color: var(--disco-rojo); }
 .ex-row.type-compound { border-left-color: var(--disco-azul); }
 .ex-row.type-isolation { border-left-color: var(--disco-verde); }
-.ex-row .ex-main { flex: 1; padding: .55rem .7rem; min-width: 0; }
+.ex-row .ex-main { flex: 1; padding: .4rem .7rem; min-width: 0; }
 .ex-row .ex-name { font-weight: 600; font-size: .95rem; }
 .ex-row .ex-tag { display: inline-block; font-size: .68rem; padding: .05rem .4rem; border-radius: 6px; margin-left: .4rem; vertical-align: middle; background: var(--disco-rojo); color: #fff; font-weight: 700; }
-.ex-row .ex-fields { display: flex; gap: .9rem; margin-top: .3rem; font-size: .75rem; color: var(--acero); flex-wrap: wrap; }
-.ex-row .ex-fields .f b { color: var(--tiza); font-weight: 600; }
-.ex-row .ex-sets { font-family: var(--font-display); font-size: 1.5rem; font-weight: 600; padding: .55rem .8rem; display: flex; align-items: center; white-space: nowrap; }
-.ex-group { margin-bottom: .4rem; }
-.ex-group .backoff { margin-top: .35rem; margin-left: .9rem; }
+.ex-row .ex-fields { display: flex; gap: .9rem; margin-top: .25rem; font-size: .75rem; color: var(--acero); flex-wrap: wrap; }
+.ex-row .ex-fields .f { display: inline-flex; align-items: center; gap: .25rem; }
+.ex-row .ex-fields .icon { width: .85rem; height: .85rem; }
+.ex-row .ex-sets { font-family: var(--font-display); font-size: 1.5rem; font-weight: 600; padding: .4rem .8rem; display: flex; align-items: center; white-space: nowrap; }
+.ex-group .backoff { margin-left: .9rem; }
+.ex-group .backoff .ex-row { border-left-width: 3px; }
 .ex-group .backoff .ex-sets { font-size: 1.15rem; }
 
-/* Compatibilidad transitoria con el marcado anterior (se retira en Fase 3). */
-.session h4 { display: flex; justify-content: space-between; margin: 0; padding: .8rem .9rem; font-family: var(--font-display); font-weight: 600; }
-.session h4 small { font-weight: 400; font-family: var(--font-body); color: var(--acero); }
-.ex { display: grid; grid-template-columns: 1fr auto; gap: .2rem .6rem; padding: .35rem .9rem; border-top: 1px dashed var(--borde); font-size: .9rem; }
-.ex .n { font-weight: 500; }
-.ex .m { font-size: .75rem; color: var(--acero); }
-.ex .s { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.ex .s small { display: block; color: var(--acero); }
 
 .src { font-size: .78rem; color: var(--acero); margin-top: .5rem; }
 .src b { color: var(--tiza); }
@@ -159,7 +193,14 @@ td.num { text-align: right; white-space: nowrap; }
 
 .chart { width: 100%; height: 160px; display: block; }
 .chart .axis { stroke: var(--borde); }
-.chart .line { fill: none; stroke: var(--exito); stroke-width: 2; }
+/* pathLength="100" normaliza el largo del trazo a 100 unidades sin
+ * importar cuánto mida la curva real, para poder animarlo con un
+ * dasharray/dashoffset fijo. Se dibuja una sola vez al entrar (es una
+ * animation, no una transition: corre siempre que el path se inserta). */
+.chart .line { fill: none; stroke: var(--exito); stroke-width: 2; stroke-dasharray: 100; stroke-dashoffset: 100; }
+@media (prefers-reduced-motion: no-preference) { .chart .line { animation: chart-draw var(--dur-lenta) var(--ease-salida) forwards; } }
+@media (prefers-reduced-motion: reduce) { .chart .line { stroke-dashoffset: 0; } }
+@keyframes chart-draw { to { stroke-dashoffset: 0; } }
 .chart .line2 { fill: none; stroke: var(--acero); stroke-width: 1.5; stroke-dasharray: 4 3; }
 .chart .dot { fill: var(--exito); }
 .chart .dot-faint { fill: var(--acero); opacity: .5; }
@@ -189,7 +230,16 @@ li { margin-bottom: .25rem; }
 .sm-last .v { color: var(--tiza); font-weight: 600; }
 
 .sm-set { display: flex; align-items: center; gap: .6rem; background: var(--superficie); border: 1px solid var(--borde); border-radius: 12px; padding: .6rem .7rem; margin-bottom: .6rem; }
-.sm-set.done { border-color: var(--exito); }
+.sm-set.done { border-color: var(--exito); opacity: .7; }
+.sm-set .done-btn .check-draw { width: 1.3rem; height: 1.3rem; stroke-dasharray: 24; stroke-dashoffset: 24; }
+@media (prefers-reduced-motion: no-preference) {
+  .sm-set.done { animation: sm-row-dim var(--dur-media) var(--ease-salida) forwards; }
+  .sm-set.done .done-btn .check-draw { animation: check-draw var(--dur-media) var(--ease-salida) forwards; }
+}
+/* Sin la animación, el trazo tiene que quedar dibujado igual (no oculto). */
+@media (prefers-reduced-motion: reduce) { .sm-set .done-btn .check-draw { stroke-dashoffset: 0; } }
+@keyframes check-draw { to { stroke-dashoffset: 0; } }
+@keyframes sm-row-dim { from { opacity: 1; } to { opacity: .7; } }
 .sm-set .idx { font-family: var(--font-display); font-size: 1.1rem; color: var(--acero); width: 1.6rem; text-align: center; flex-shrink: 0; }
 .sm-set input { text-align: center; font-family: var(--font-display); font-size: 1.2rem; min-height: 48px; }
 .sm-set .unit { font-size: .75rem; color: var(--acero); text-align: center; margin-top: .15rem; }
@@ -200,10 +250,25 @@ li { margin-bottom: .25rem; }
 .sm-nav .btn { min-height: 56px; font-size: 1.3rem; }
 
 .timer-overlay { position: fixed; inset: 0; z-index: 40; background: rgba(35,39,43,.92); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem; padding: 1rem; }
-.timer-num { font-family: var(--font-display); font-size: 4.5rem; font-weight: 600; color: var(--tiza); font-variant-numeric: tabular-nums; }
+.timer-num { font-family: var(--font-display); font-size: 2.6rem; font-weight: 600; color: var(--tiza); font-variant-numeric: tabular-nums; }
 .timer-label { color: var(--acero); font-size: .9rem; }
 .timer-actions { display: flex; gap: .7rem; }
 .timer-actions .btn { min-height: 56px; min-width: 88px; }
+
+/* Anillo de descanso: se vacía a medida que pasa el tiempo (el trazo
+ * visible encoge con stroke-dashoffset). Últimos 10s: --disco-amarillo.
+ * Al llegar a 0: pulso breve + vibración (en JS). */
+.timer-ring-wrap { position: relative; width: 180px; height: 180px; }
+.timer-ring { width: 100%; height: 100%; transform: rotate(-90deg); }
+.timer-ring .ring-bg { fill: none; stroke: var(--superficie-2); stroke-width: 8; }
+.timer-ring .ring-fg { fill: none; stroke: var(--disco-azul); stroke-width: 8; stroke-linecap: round; }
+.timer-ring.urgent .ring-fg { stroke: var(--disco-amarillo); }
+@media (prefers-reduced-motion: no-preference) {
+  .timer-ring .ring-fg { transition: stroke-dashoffset 1s linear, stroke var(--dur-media) ease; }
+  .timer-ring-wrap.pulse { animation: timer-pulse var(--dur-media) var(--ease-salida); }
+}
+@keyframes timer-pulse { 0% { transform: scale(1); } 45% { transform: scale(1.1); } 100% { transform: scale(1); } }
+.timer-num-wrap { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
 
 .sm-image-wrap { position: relative; width: 140px; height: 140px; margin: 0 auto .8rem; border-radius: var(--radius); overflow: hidden; background: var(--superficie-2); }
 .sm-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
@@ -220,6 +285,25 @@ li { margin-bottom: .25rem; }
 .platebar-wrap { text-align: center; margin: .8rem 0; }
 .platebar-weight { font-family: var(--font-display); font-size: 1.4rem; margin-bottom: .3rem; }
 .platebar-note { font-size: .75rem; color: var(--acero); }
+/* Los discos se cargan uno a la vez, de adentro hacia afuera (como en la
+ * vida real), con un pequeño desfase entre ellos. */
+.plate-rect { transform-box: fill-box; transform-origin: center; }
+@media (prefers-reduced-motion: no-preference) {
+  .plate-rect-l { animation: plate-slide-l var(--dur-media) var(--ease-salida) backwards; }
+  .plate-rect-r { animation: plate-slide-r var(--dur-media) var(--ease-salida) backwards; }
+}
+@keyframes plate-slide-l { from { transform: translateX(-14px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+@keyframes plate-slide-r { from { transform: translateX(14px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+/* Fase 5: momento de nuevo récord. Los discos del top set golpean con un
+ * rebote corto y aparece un cartel con el trofeo durante 2s. */
+@media (prefers-reduced-motion: no-preference) { #platebar-top.plate-bounce .platebar { animation: plate-bounce 550ms var(--ease-salida); } }
+@keyframes plate-bounce { 0% { transform: translateY(0); } 28% { transform: translateY(-5px); } 52% { transform: translateY(0); } 72% { transform: translateY(-2px); } 100% { transform: translateY(0); } }
+.record-banner { position: fixed; left: 50%; top: 16%; transform: translate(-50%, -10px); opacity: 0; display: flex; align-items: center; gap: .5rem; background: var(--disco-amarillo); color: #23270a; font-weight: 700; font-size: .95rem; padding: .7rem 1.1rem; border-radius: 999px; box-shadow: 0 8px 20px rgba(0,0,0,.4); z-index: 60; pointer-events: none; }
+.record-banner .icon { width: 1.3rem; height: 1.3rem; }
+.record-banner.show { opacity: 1; transform: translate(-50%, 0); }
+@media (prefers-reduced-motion: no-preference) { .record-banner { transition: opacity var(--dur-media) var(--ease-salida), transform var(--dur-media) var(--ease-salida); } }
+@media (prefers-reduced-motion: reduce) { .record-banner { transition: none; } }
 
 .modal-overlay { position: fixed; inset: 0; z-index: 50; background: rgba(35,39,43,.75); display: flex; align-items: center; justify-content: center; padding: 1rem; }
 .modal-card { background: var(--superficie); border-radius: var(--radius); padding: 1.2rem; max-width: 360px; width: 100%; }
@@ -228,7 +312,10 @@ li { margin-bottom: .25rem; }
 
 .chart .dot-short { fill: none; stroke: var(--disco-amarillo); stroke-width: 2; }
 
-@media (prefers-reduced-motion: no-preference) {
-  .session-body { transition: grid-template-rows .18s ease; }
-  .ex-row { transition: transform .12s ease; }
-}
+/* Fase 6: comparación del top set del día contra el anterior. */
+.topset-cmp { display: inline-flex; align-items: center; gap: .2rem; font-weight: 600; font-size: .85rem; white-space: nowrap; }
+.topset-cmp .icon { width: .9rem; height: .9rem; }
+.topset-cmp.cmp-up { color: var(--exito); }
+.topset-cmp.cmp-down { color: var(--peligro); }
+.topset-cmp.cmp-flat { color: var(--acero); }
+

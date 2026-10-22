@@ -31,6 +31,34 @@
   const n1 = v => (Math.round(v * 10) / 10).toLocaleString('es');
   const n0 = v => Math.round(v).toLocaleString('es');
   const n2 = v => (Math.round(v * 100) / 100).toLocaleString('es', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const icon = (name, cls) => `<svg class="icon${cls ? ' ' + cls : ''}" aria-hidden="true"><use href="#icon-${name}"></use></svg>`;
+
+  /* Conteo animado de las métricas grandes del Resumen: solo la primera
+   * vez que se visitan en esta sesión de la pestaña (ui.countedOnce);
+   * en visitas siguientes, o con prefers-reduced-motion, el número
+   * aparece directo en su valor final. */
+  ui.countedOnce = ui.countedOnce || new Set();
+  const statCount = (value, decimals, suffix) => `<span class="count-num" data-target="${value}" data-decimals="${decimals || 0}">0</span>${suffix ? esc(suffix) : ''}`;
+  function wireCounts(container, key) {
+    const nodes = container.querySelectorAll('.count-num');
+    const already = ui.countedOnce.has(key);
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    nodes.forEach(el => {
+      const target = parseFloat(el.dataset.target) || 0;
+      const decimals = Number(el.dataset.decimals) || 0;
+      const fmt = v => decimals ? v.toFixed(decimals).replace('.', ',') : Math.round(v).toLocaleString('es');
+      if (already || reduced) { el.textContent = fmt(target); return; }
+      const start = performance.now(), dur = 600;
+      const tick = now => {
+        const p = Math.min(1, (now - start) / dur);
+        const eased = 1 - Math.pow(1 - p, 3);
+        el.textContent = fmt(target * eased);
+        if (p < 1) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    ui.countedOnce.add(key);
+  }
   const fmtDate = iso => { const d = new Date(iso + 'T00:00:00'); return isNaN(d) ? iso : d.toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric' }); };
   const cite = ids => (Array.isArray(ids) ? ids : [ids]).map(id => `<span class="cite" title="${esc(KNOWLEDGE.SOURCES[id] ? KNOWLEDGE.SOURCES[id].short : id)}">${esc(id)}</span>`).join('');
 
@@ -62,12 +90,20 @@
   }
 
   /* ---------- Navegación ---------- */
+  const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => go(b.dataset.tab)));
   function go(tab) {
     ui.tab = tab;
-    document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
-    render();
-    window.scrollTo({ top: 0 });
+    const apply = () => {
+      document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+      render();
+      window.scrollTo({ top: 0 });
+    };
+    // Fundido corto entre pestañas con la View Transitions API; si el
+    // navegador no la soporta (o el usuario pide menos movimiento), el
+    // cambio es instantáneo, sin fallback animado propio.
+    if (document.startViewTransition && !prefersReducedMotion()) document.startViewTransition(apply);
+    else apply();
   }
 
   function render() {
@@ -106,7 +142,7 @@
           <input type="file" id="file-import" accept="application/json" hidden>
         </div>
       </div>
-      ${items || '<div class="empty"><div class="big">🏋️</div><p>Aún no hay perfiles.<br>Crea el primero para obtener tu plan.</p></div>'}
+      ${items || `<div class="empty"><div class="big">${icon('person')}</div><p>Aún no hay perfiles.<br>Crea el primero para obtener tu plan.</p></div>`}
       ${active() ? `<div class="card">
         <h3>Perfil activo: ${esc(active().data.name)}</h3>
         <div class="btn-row">
@@ -319,7 +355,7 @@
   /* ---------- Plan ---------- */
   function renderPlan() {
     const p = active();
-    if (!p) { view.innerHTML = '<div class="empty"><div class="big">🎯</div><p>Crea o abre un perfil para ver su plan.</p><button class="btn btn-primary" id="e-new">Nuevo perfil</button></div>'; $('#e-new').onclick = () => go('data'); return; }
+    if (!p) { view.innerHTML = `<div class="empty"><div class="big">${icon('barbell')}</div><p>Crea o abre un perfil para ver su plan.</p><button class="btn btn-primary" id="e-new">Nuevo perfil</button></div>`; $('#e-new').onclick = () => go('data'); return; }
     const plan = ENGINE.buildPlan(p.data, todayIso());
     const tabs = [['summary', 'Resumen'], ['nutrition', 'Dieta'], ['training', 'Entreno'], ['targets', 'Medidas'], ['supps', 'Suplementos']];
     view.innerHTML = `
@@ -327,7 +363,7 @@
       <div id="plan-body"></div>`;
     view.querySelectorAll('[data-pt]').forEach(b => b.onclick = () => { ui.planTab = b.dataset.pt; renderPlan(); });
     const body = $('#plan-body');
-    if (ui.planTab === 'summary') body.innerHTML = htmlSummary(plan, p);
+    if (ui.planTab === 'summary') { body.innerHTML = htmlSummary(plan, p); wireCounts(body, 'summary:' + p.id); }
     else if (ui.planTab === 'nutrition') body.innerHTML = htmlNutrition(plan);
     else if (ui.planTab === 'training') body.innerHTML = htmlTraining(plan);
     else if (ui.planTab === 'targets') body.innerHTML = htmlTargets(plan);
@@ -343,7 +379,7 @@
         const bodyEl = document.getElementById('day-body-' + btn.dataset.toggleDay);
         const isOpen = btn.getAttribute('aria-expanded') === 'true';
         btn.setAttribute('aria-expanded', String(!isOpen));
-        if (bodyEl) bodyEl.hidden = isOpen;
+        if (bodyEl) bodyEl.inert = isOpen;
       };
     });
     view.querySelectorAll('[data-start-session]').forEach(btn => {
@@ -365,14 +401,14 @@
         <p class="muted">${esc(t.division.label)} · ${goalLabel} · generado ${fmtDate(plan.generatedAt)}</p>
         ${alerts(plan.warnings)}
         <div class="grid">
-          <div class="stat"><div class="v">${n0(n.calories)}</div><div class="l">kcal/día (${esc(n.deltaLabel)})</div></div>
-          <div class="stat"><div class="v">${n.protein} g</div><div class="l">proteína</div></div>
-          <div class="stat"><div class="v">${n.carbs} g</div><div class="l">carbohidratos</div></div>
-          <div class="stat"><div class="v">${n.fat} g</div><div class="l">grasas</div></div>
-          <div class="stat"><div class="v">${n1(m.bodyFat)} %</div><div class="l">grasa actual</div><div class="s">${esc(m.bfMethod)}</div></div>
-          <div class="stat"><div class="v">${n1(t.targetBf)} %</div><div class="l">grasa objetivo</div></div>
-          <div class="stat"><div class="v">${n1(t.targetWeight)} kg</div><div class="l">peso objetivo</div><div class="s">${t.delta >= 0 ? '+' : ''}${n1(t.delta)} kg</div></div>
-          <div class="stat"><div class="v">${plan.input.goal === 'maintain' ? '—' : n0(t.weeksNeeded) + ' sem'}</div><div class="l">duración estimada</div><div class="s">${plan.input.goal === 'maintain' ? '' : 'hasta ' + fmtDate(t.estimatedDate)}</div></div>
+          <div class="stat"><div class="v">${statCount(n.calories, 0)}</div><div class="l">kcal/día (${esc(n.deltaLabel)})</div></div>
+          <div class="stat"><div class="v">${statCount(n.protein, 0, ' g')}</div><div class="l">proteína</div></div>
+          <div class="stat"><div class="v">${statCount(n.carbs, 0, ' g')}</div><div class="l">carbohidratos</div></div>
+          <div class="stat"><div class="v">${statCount(n.fat, 0, ' g')}</div><div class="l">grasas</div></div>
+          <div class="stat"><div class="v">${statCount(m.bodyFat, 1, ' %')}</div><div class="l">grasa actual</div><div class="s">${esc(m.bfMethod)}</div></div>
+          <div class="stat"><div class="v">${statCount(t.targetBf, 1, ' %')}</div><div class="l">grasa objetivo</div></div>
+          <div class="stat"><div class="v">${statCount(t.targetWeight, 1, ' kg')}</div><div class="l">peso objetivo</div><div class="s">${t.delta >= 0 ? '+' : ''}${n1(t.delta)} kg</div></div>
+          <div class="stat"><div class="v">${plan.input.goal === 'maintain' ? '—' : statCount(t.weeksNeeded, 0, ' sem')}</div><div class="l">duración estimada</div><div class="s">${plan.input.goal === 'maintain' ? '' : 'hasta ' + fmtDate(t.estimatedDate)}</div></div>
         </div>
       </div>
       <div class="card">
@@ -486,9 +522,9 @@
       <div class="ex-main">
         <div class="ex-name">${esc(label != null ? label : e.name)}${showTag ? ' <span class="ex-tag">Top set</span>' : ''}</div>
         <div class="ex-fields">
-          <span class="f">Grupo <b>${esc(e.muscleLabel)}</b></span>
-          <span class="f">RIR <b>${esc(showTag ? e.topSet.rir : e.rir)}</b></span>
-          <span class="f">Descanso <b>${esc(showTag ? '3 min' : e.rest)}</b></span>
+          <span class="f">${esc(e.muscleLabel)}</span>
+          <span class="f">${icon('gauge')} RIR ${esc(showTag ? e.topSet.rir : e.rir)}</span>
+          <span class="f">${icon('clock')} ${esc(showTag ? '3 min' : e.rest)}</span>
         </div>
       </div>
       <div class="ex-sets">${esc(setsLabel)} × ${esc(reps)}</div>
@@ -508,19 +544,42 @@
 
   function htmlSessionCard(s, i, isToday) {
     const open = isToday;
+    // Composición del día por tipo de serie: el top set de cada ejercicio
+    // con top set cuenta como 1 (rojo); el resto de sus series (back-off)
+    // y las series de los ejercicios sin top set cuentan como azul
+    // (multiarticular) o verde (aislamiento) según el tipo del ejercicio.
+    const counts = { top: 0, compound: 0, isolation: 0 };
+    s.exercises.forEach(e => {
+      const rest = e.topSet ? e.sets - 1 : e.sets;
+      if (e.topSet) counts.top += 1;
+      counts[e.type === 'compound' ? 'compound' : 'isolation'] += rest;
+    });
+    const pct = n => s.totalSets ? (n / s.totalSets * 100) : 0;
+    const muscles = [...new Set(s.exercises.map(e => e.muscleLabel))];
     return `<div class="session">
       <button type="button" class="session-head" data-toggle-day="${i}" aria-expanded="${open}" aria-controls="day-body-${i}">
-        <div>
-          <h4>${esc(s.name)}${isToday ? ' <span class="cite">hoy</span>' : ''}</h4>
-          <div class="meta">${s.totalSets} series · ~${s.durationMin} min</div>
+        <div class="session-head-main">
+          <h4>${esc(s.name)}${isToday ? ' <span class="day-tag">hoy</span>' : ''}</h4>
+          <div class="session-metrics">
+            <span class="metric"><b>${s.totalSets}</b> series</span>
+            <span class="metric">${icon('clock')} ~${s.durationMin} min</span>
+          </div>
+          <div class="session-bar" aria-hidden="true">
+            <span class="top" style="width:${pct(counts.top)}%"></span>
+            <span class="compound" style="width:${pct(counts.compound)}%"></span>
+            <span class="isolation" style="width:${pct(counts.isolation)}%"></span>
+          </div>
+          <div class="session-muscles">${muscles.map(m => `<span class="chip">${esc(m)}</span>`).join('')}</div>
         </div>
-        <span class="chev" aria-hidden="true">▾</span>
+        ${icon('chevron', 'chev')}
       </button>
-      <div class="session-body" id="day-body-${i}" ${open ? '' : 'hidden'}>
-        ${s.exercises.map(htmlExercise).join('')}
-        <div class="btn-row" style="margin-top:.6rem">
-          <button class="btn btn-primary btn-lg" data-start-session="${i}" style="flex:2">Empezar sesión</button>
-          <button class="btn" data-start-session-short="${i}" style="flex:1">Versión corta</button>
+      <div class="session-body" id="day-body-${i}" ${open ? '' : 'inert'}>
+        <div class="session-body-inner">
+          <div class="ex-list">${s.exercises.map(htmlExercise).join('')}</div>
+          <div class="btn-row" style="margin-top:.6rem">
+            <button class="btn btn-primary btn-lg" data-start-session="${i}" style="flex:2">Empezar sesión</button>
+            <button class="btn" data-start-session-short="${i}" style="flex:1">Versión corta</button>
+          </div>
         </div>
       </div>
     </div>`;
@@ -629,11 +688,12 @@
     const colorFor = w => { const idx = canon.findIndex(p => Math.abs(p - w) < 1e-6); return KNOWLEDGE.PLATE_COLORS[idx === -1 ? canon.length - 1 : idx]; };
     const heightFor = w => Math.min(64, 24 + w * (unit === 'lb' ? 0.55 : 1.2));
     const widthFor = w => (unit === 'lb' ? w >= 35 : w >= 10) ? 11 : 7;
-    let x = 96; // arranca pegado al manguito, hacia afuera
+    let x = 96, i = 0; // arranca pegado al manguito, hacia afuera
     const rects = result.plates.map(w => {
       const h = heightFor(w), wd = widthFor(w);
-      const svg = `<rect x="${x}" y="${(100 - h) / 2}" width="${wd}" height="${h}" rx="2" fill="${colorFor(w)}" stroke="#1a1d20" stroke-width="1"></rect><rect x="${292 - x - wd}" y="${(100 - h) / 2}" width="${wd}" height="${h}" rx="2" fill="${colorFor(w)}" stroke="#1a1d20" stroke-width="1"></rect>`;
-      x += wd + 1.5;
+      const delay = `style="animation-delay:${i * 40}ms"`;
+      const svg = `<rect class="plate-rect plate-rect-l" ${delay} x="${x}" y="${(100 - h) / 2}" width="${wd}" height="${h}" rx="2" fill="${colorFor(w)}" stroke="#1a1d20" stroke-width="1"></rect><rect class="plate-rect plate-rect-r" ${delay} x="${292 - x - wd}" y="${(100 - h) / 2}" width="${wd}" height="${h}" rx="2" fill="${colorFor(w)}" stroke="#1a1d20" stroke-width="1"></rect>`;
+      x += wd + 1.5; i++;
       return svg;
     }).join('');
     return `<svg class="platebar" viewBox="0 0 292 100" width="100%" height="64" role="img" aria-label="Carga de la barra">
@@ -664,7 +724,7 @@
     const findLast = (type, num) => last && last.sets.find(s => s.setType === type && s.setNumber === num);
     if (hasTop) {
       const topW = findLast('top', 1); const boW = findLast('backoff', 1);
-      return `<div class="card" style="margin-bottom:.8rem"><h3 style="font-size:.85rem;margin-bottom:.3rem">Carga · Top set</h3>${htmlPlateBar(profile, ex.pattern, topW && topW.weight)}</div>` +
+      return `<div class="card" id="platebar-top" style="margin-bottom:.8rem"><h3 style="font-size:.85rem;margin-bottom:.3rem">Carga · Top set</h3>${htmlPlateBar(profile, ex.pattern, topW && topW.weight)}</div>` +
         (ex.sets.some(s => s.setType === 'backoff') ? `<div class="card" style="margin-bottom:.8rem"><h3 style="font-size:.85rem;margin-bottom:.3rem">Carga · Back-off</h3>${htmlPlateBar(profile, ex.pattern, boW && boW.weight)}</div>` : '');
     }
     const firstW = findLast('normal', 1);
@@ -770,7 +830,7 @@
           <div class="sm-exmeta">${esc(ex.muscleLabel)} ${sm.short ? `· ~${ex.durationMin} min` : ''}</div>
           ${htmlExerciseImage(ex)}
           ${last ? `<div class="sm-last ${last.sets.some(s => s.setType === 'top') ? 'sm-last-top' : ''}">
-            <b>Última vez</b> (${fmtDate(last.date)}): ${last.sets.map(s => `${s.setType === 'top' ? '🏆 ' : ''}<span class="v">${n1(s.weight)} ${profile.data.plateUnit || 'kg'} × ${s.reps}</span>`).join(' · ')}
+            <b>Última vez</b> (${fmtDate(last.date)}): ${last.sets.map(s => `${s.setType === 'top' ? icon('trophy') + ' ' : ''}<span class="v">${n1(s.weight)} ${profile.data.plateUnit || 'kg'} × ${s.reps}</span>`).join(' · ')}
           </div>` : `<div class="sm-last">Primera vez que registrás este ejercicio.</div>`}
           ${htmlPlateBarsForExercise(profile, ex, last)}
           ${ex.sets.map((st, i) => htmlSmSet(st, i, vals[i], profile.data.plateUnit || 'kg')).join('')}
@@ -787,10 +847,10 @@
   function htmlSmSet(st, i, v, unit) {
     const label = { top: 'Top set', backoff: 'Back-off', normal: `Serie ${st.setNumber}` }[st.setType];
     return `<div class="sm-set ${v.done ? 'done' : ''}" data-set="${i}">
-      <div class="idx">${label === `Serie ${st.setNumber}` ? st.setNumber : (st.setType === 'top' ? '🏆' : '↓')}</div>
+      <div class="idx">${label === `Serie ${st.setNumber}` ? st.setNumber : (st.setType === 'top' ? icon('trophy') : '↓')}</div>
       <div class="fieldwrap"><input type="number" inputmode="decimal" placeholder="${unit}" value="${v.weight || ''}" data-sm-weight="${i}" ${v.done ? 'disabled' : ''}><div class="unit">peso (${unit})</div></div>
       <div class="fieldwrap"><input type="number" inputmode="numeric" placeholder="${st.repsLabel}" value="${v.reps || ''}" data-sm-reps="${i}" ${v.done ? 'disabled' : ''}><div class="unit">reps (obj. ${esc(st.repsLabel)})</div></div>
-      <button class="btn ${v.done ? '' : 'btn-primary'} done-btn" data-sm-done="${i}" ${v.done ? 'disabled' : ''}>${v.done ? '✓' : 'Hecha'}</button>
+      <button class="btn ${v.done ? '' : 'btn-primary'} done-btn" data-sm-done="${i}" ${v.done ? 'disabled' : ''}>${v.done ? icon('check', 'check-draw') : 'Hecha'}</button>
     </div>`;
   }
 
@@ -826,24 +886,79 @@
     save();
     renderSessionMode(profile);
     startRestTimer(st.restLabel);
+    if (st.setType === 'top') maybeShowRecord(profile, ex, weight, reps);
   }
+
+  /* Fase 5: "nuevo récord" es puramente informativo para motivar en el
+   * momento (no toca el plan ni ninguna regla): compara el 1RM estimado
+   * del top set recién logueado, con la fórmula de Epley, contra el
+   * mejor 1RM estimado del mismo ejercicio en sesiones ANTERIORES
+   * (nunca la actual). Máximo una vez por ejercicio y por sesión. */
+  function maybeShowRecord(profile, ex, weight, reps) {
+    sm.recordShown = sm.recordShown || new Set();
+    if (sm.recordShown.has(ex.name) || !weight) return;
+    const prior = (profile.workouts || []).filter(w => w.exercise === ex.name && w.setType === 'top' && w.sessionId !== sm.sessionId);
+    if (!prior.length) return;
+    const epley = (w, r) => w * (1 + r / 30);
+    const priorBest = Math.max(...prior.map(w => epley(w.weight, w.reps)));
+    if (epley(weight, reps) <= priorBest) return;
+    sm.recordShown.add(ex.name);
+    showRecordMoment(profile, weight, reps);
+  }
+
+  function showRecordMoment(profile, weight, reps) {
+    if (navigator.vibrate) navigator.vibrate([90, 70, 90]);
+    const bar = document.getElementById('platebar-top');
+    if (bar) { bar.classList.add('plate-bounce'); setTimeout(() => bar.classList.remove('plate-bounce'), 550); }
+    const root = document.getElementById('session-mode-root');
+    if (!root) return;
+    const unit = profile.data.plateUnit || 'kg';
+    const banner = document.createElement('div');
+    banner.className = 'record-banner';
+    banner.innerHTML = `${icon('trophy')}<span>Nuevo récord: ${n1(weight)} ${unit} × ${reps}</span>`;
+    root.appendChild(banner);
+    requestAnimationFrame(() => requestAnimationFrame(() => banner.classList.add('show')));
+    setTimeout(() => { banner.classList.remove('show'); setTimeout(() => banner.remove(), 300); }, 2000);
+  }
+
+  const TIMER_RING_R = 52;
+  const TIMER_RING_C = 2 * Math.PI * TIMER_RING_R;
 
   function startRestTimer(restLabel) {
     const total = parseRestSeconds(restLabel);
-    smTimerState = { remaining: total };
+    smTimerState = { remaining: total, total };
     const root = document.getElementById('session-mode-root');
     closeTimer();
     const ov = document.createElement('div'); ov.className = 'timer-overlay'; ov.id = 'sm-timer';
-    ov.innerHTML = `<div class="timer-label">Descanso</div><div class="timer-num" id="sm-timer-num">${fmtTimer(total)}</div>
+    ov.innerHTML = `<div class="timer-label">Descanso</div>
+      <div class="timer-ring-wrap" id="sm-timer-ring-wrap">
+        <svg class="timer-ring" viewBox="0 0 120 120" aria-hidden="true">
+          <circle class="ring-bg" cx="60" cy="60" r="${TIMER_RING_R}"></circle>
+          <circle class="ring-fg" id="sm-timer-ring-fg" cx="60" cy="60" r="${TIMER_RING_R}" stroke-dasharray="${TIMER_RING_C.toFixed(1)}" stroke-dashoffset="0"></circle>
+        </svg>
+        <div class="timer-num-wrap"><div class="timer-num" id="sm-timer-num">${fmtTimer(total)}</div></div>
+      </div>
       <div class="timer-actions"><button class="btn btn-lg" id="sm-timer-plus30">+30 s</button><button class="btn btn-primary btn-lg" id="sm-timer-skip">Saltar</button></div>`;
     root.appendChild(ov);
-    $('#sm-timer-plus30').onclick = () => { smTimerState.remaining += 30; };
+    const updateTimerUi = () => {
+      const r = Math.max(0, smTimerState.remaining);
+      const numEl = document.getElementById('sm-timer-num'); if (numEl) numEl.textContent = fmtTimer(r);
+      const fg = document.getElementById('sm-timer-ring-fg');
+      if (fg) fg.style.strokeDashoffset = (TIMER_RING_C * (1 - Math.min(1, r / smTimerState.total))).toFixed(1);
+      const ring = ov.querySelector('.timer-ring'); if (ring) ring.classList.toggle('urgent', r <= 10 && r > 0);
+    };
+    updateTimerUi();
+    $('#sm-timer-plus30').onclick = () => { smTimerState.remaining += 30; updateTimerUi(); };
     $('#sm-timer-skip').onclick = () => closeTimer();
     smTimerInterval = setInterval(() => {
       smTimerState.remaining -= 1;
-      const numEl = document.getElementById('sm-timer-num');
-      if (numEl) numEl.textContent = fmtTimer(Math.max(0, smTimerState.remaining));
-      if (smTimerState.remaining <= 0) { if (navigator.vibrate) navigator.vibrate([200, 100, 200]); closeTimer(); }
+      updateTimerUi();
+      if (smTimerState.remaining <= 0) {
+        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+        clearInterval(smTimerInterval); smTimerInterval = null;
+        const wrap = document.getElementById('sm-timer-ring-wrap');
+        if (wrap) { wrap.classList.add('pulse'); setTimeout(closeTimer, 500); } else closeTimer();
+      }
     }, 1000);
   }
   function closeTimer() {
@@ -851,24 +966,46 @@
     const ov = document.getElementById('sm-timer'); if (ov) ov.remove();
   }
 
+  function priorTopWeightFor(profile, exerciseName) {
+    const all = (profile.workouts || []).filter(w => w.exercise === exerciseName && w.setType === 'top' && w.sessionId !== sm.sessionId);
+    if (!all.length) return null;
+    let last = all[0];
+    all.forEach(w => { if (w.savedAt > last.savedAt) last = w; });
+    return last.weight;
+  }
+
   function htmlSmSummary(profile) {
     const flatVals = sm.values.flat();
     const doneCount = flatVals.filter(v => v.done).length;
+    const totalCount = flatVals.length;
     const pending = sm.exercises.filter((e, i) => sm.values[i].some(v => !v.done)).map(e => e.name);
     const durationMin = Math.max(1, Math.round((Date.now() - sm.startedAt) / 60000));
     const topSets = [];
-    sm.exercises.forEach((e, i) => e.sets.forEach((st, j) => { const v = sm.values[i][j]; if (st.setType === 'top' && v.done) topSets.push({ name: e.name, weight: v.weight, reps: v.reps }); }));
+    sm.exercises.forEach((e, i) => e.sets.forEach((st, j) => {
+      const v = sm.values[i][j];
+      if (st.setType === 'top' && v.done) topSets.push({ name: e.name, weight: v.weight, reps: v.reps, prior: priorTopWeightFor(profile, e.name) });
+    }));
+    const topSetRow = t => {
+      let cmp = '';
+      if (t.prior != null) {
+        const diff = round2(t.weight - t.prior);
+        const dir = diff > 0 ? 'up' : diff < 0 ? 'down' : 'flat';
+        const ic = dir === 'up' ? 'arrow-up' : dir === 'down' ? 'arrow-down' : 'arrow-flat';
+        cmp = `<span class="topset-cmp cmp-${dir}">${icon(ic)} ${diff === 0 ? 'igual' : (diff > 0 ? '+' : '') + n1(diff) + ' kg'}</span>`;
+      }
+      return `<li><b>${esc(t.name)}</b>: ${n1(t.weight)} kg × ${t.reps} ${cmp}</li>`;
+    };
     return `<div class="session-mode">
       <div class="session-mode-head"><div></div><div class="prog">Resumen de la sesión</div><div></div></div>
       <div class="session-mode-body">
         <div class="card accent">
           <h2>${esc(sm.dayName)} ${sm.short ? '· versión corta' : ''}</h2>
           <div class="grid">
-            <div class="stat"><div class="v">${doneCount}</div><div class="l">series hechas</div></div>
+            <div class="stat"><div class="v">${doneCount}/${totalCount}</div><div class="l">series hechas</div></div>
             <div class="stat"><div class="v">${durationMin}</div><div class="l">min reales</div></div>
           </div>
         </div>
-        ${topSets.length ? `<div class="card"><h3>Top sets del día</h3><ul>${topSets.map(t => `<li><b>${esc(t.name)}</b>: ${n1(t.weight)} kg × ${t.reps}</li>`).join('')}</ul></div>` : ''}
+        ${topSets.length ? `<div class="card"><h3>Top sets del día</h3><ul>${topSets.map(topSetRow).join('')}</ul></div>` : ''}
         ${pending.length ? `<div class="card"><h3>Ejercicios con series sin terminar</h3><ul>${pending.map(n => `<li>${esc(n)}</li>`).join('')}</ul></div>` : '<div class="card"><p class="muted">Todas las series quedaron registradas. ¡Bien ahí!</p></div>'}
         <button class="btn btn-primary btn-block btn-lg" id="sm-back-to-plan">Volver al plan</button>
       </div>
@@ -876,10 +1013,37 @@
   }
   function wireSmSummary() { $('#sm-back-to-plan').onclick = () => { endSessionMode(); render(); }; }
 
+  /* Fase 6: encabezado de Progreso con 4 métricas derivadas del log (vista
+   * pura, no participan de ningún cálculo del plan). */
+  function htmlProgressHeader(log, plan) {
+    const t = plan.targets;
+    let avg7 = null, totalChange = null, realRate = null;
+    if (log.length) {
+      const lastDate = new Date(log[log.length - 1].date + 'T00:00:00').getTime();
+      const windowStart = lastDate - 6 * 86400000;
+      const inWindow = log.filter(e => new Date(e.date + 'T00:00:00').getTime() >= windowStart);
+      avg7 = inWindow.reduce((s, e) => s + e.weightKg, 0) / inWindow.length;
+    }
+    if (log.length >= 2) {
+      totalChange = log[log.length - 1].weightKg - log[0].weightKg;
+      const days = (new Date(log[log.length - 1].date + 'T00:00:00') - new Date(log[0].date + 'T00:00:00')) / 86400000;
+      if (days > 0) realRate = totalChange / (days / 7);
+    }
+    const fmtKg = v => v == null ? '—' : `${v > 0 ? '+' : ''}${n1(v)} kg`;
+    const fmtRate = v => v == null ? '—' : `${v > 0 ? '+' : ''}${n2(v)} kg/sem`;
+    const previstoLabel = plan.input.goal === 'maintain' ? 'previsto 0' : `previsto ${plan.input.goal === 'cut' ? '−' : '+'}${n2(Math.abs(t.rateKg))} kg/sem`;
+    return `<div class="grid" style="margin-top:.8rem">
+      <div class="stat"><div class="v">${avg7 != null ? n1(avg7) + ' kg' : '—'}</div><div class="l">peso actual</div><div class="s">promedio 7 días</div></div>
+      <div class="stat"><div class="v">${fmtKg(totalChange)}</div><div class="l">cambio desde el inicio</div></div>
+      <div class="stat"><div class="v">${fmtRate(realRate)}</div><div class="l">ritmo real</div><div class="s">${previstoLabel}</div></div>
+      <div class="stat"><div class="v">${plan.input.goal === 'maintain' ? '—' : n0(t.weeksNeeded) + ' sem'}</div><div class="l">estimado al objetivo</div></div>
+    </div>`;
+  }
+
   /* ---------- Progreso ---------- */
   function renderProgress() {
     const p = active();
-    if (!p) { view.innerHTML = '<div class="empty"><div class="big">📈</div><p>Abre un perfil para registrar su progreso.</p></div>'; return; }
+    if (!p) { view.innerHTML = `<div class="empty"><div class="big">${icon('trend-down')}</div><p>Abre un perfil para registrar su progreso.</p></div>`; return; }
     const plan = ENGINE.buildPlan(p.data, todayIso());
     const log = (p.log || []).slice().sort((a, b) => a.date.localeCompare(b.date));
     const workouts = p.workouts || [];
@@ -888,6 +1052,7 @@
     view.innerHTML = `
       <div class="card accent">
         <h2>Progreso · ${esc(p.data.name)}</h2>
+        ${htmlProgressHeader(log, plan)}
         <form id="log-form">
           <div class="row2">
             <div><label>Peso (kg)</label><input name="weightKg" type="number" step="0.1" inputmode="decimal" required autofocus></div>
@@ -996,7 +1161,7 @@
       <line class="axis" x1="${L}" y1="${T}" x2="${L}" y2="${H - B}"/><line class="axis" x1="${L}" y1="${H - B}" x2="${W - R}" y2="${H - B}"/>
       <line class="target" x1="${L}" y1="${Y(target)}" x2="${W - R}" y2="${Y(target)}"/>
       ${projection}
-      ${ticks}<path class="line" d="${mainPath}"/>${dotsHtml}
+      ${ticks}<path class="line" pathLength="100" d="${mainPath}"/>${dotsHtml}
       <text x="${L}" y="${H - 6}">${fmtDate(log[0].date)}</text><text x="${W - R}" y="${H - 6}" text-anchor="end">${fmtDate(log[log.length - 1].date)}</text>
     </svg>`;
   }
@@ -1033,7 +1198,7 @@
     const ticks = [yMin + 1, (yMin + yMax) / 2, yMax - 1].map(v => `<text x="${L - 4}" y="${Y(v) + 3}" text-anchor="end">${n1(v)}</text>`).join('');
     return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Evolución del top set">
       <line class="axis" x1="${L}" y1="${T}" x2="${L}" y2="${H - B}"/><line class="axis" x1="${L}" y1="${H - B}" x2="${W - R}" y2="${H - B}"/>
-      ${ticks}<path class="line" d="${path}"/>${dots}
+      ${ticks}<path class="line" pathLength="100" d="${path}"/>${dots}
       <text x="${L}" y="${H - 6}">${fmtDate(points[0].date)}</text><text x="${W - R}" y="${H - 6}" text-anchor="end">${fmtDate(points[points.length - 1].date)}</text>
     </svg>`;
   }
