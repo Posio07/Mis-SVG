@@ -305,6 +305,9 @@
     view.querySelectorAll('[data-start-session]').forEach(btn => {
       btn.onclick = () => startSessionMode(profile, plan, Number(btn.dataset.startSession), false);
     });
+    view.querySelectorAll('[data-start-session-short]').forEach(btn => {
+      btn.onclick = () => startSessionMode(profile, plan, Number(btn.dataset.startSessionShort), true);
+    });
   }
 
   function alerts(list) { return list.map(w => `<div class="alert ${w.level}">${esc(w.text)}</div>`).join(''); }
@@ -471,7 +474,10 @@
       </button>
       <div class="session-body" id="day-body-${i}" ${open ? '' : 'hidden'}>
         ${s.exercises.map(htmlExercise).join('')}
-        <button class="btn btn-primary btn-block btn-lg" data-start-session="${i}" style="margin-top:.6rem">Empezar sesión</button>
+        <div class="btn-row" style="margin-top:.6rem">
+          <button class="btn btn-primary btn-lg" data-start-session="${i}" style="flex:2">Empezar sesión</button>
+          <button class="btn" data-start-session-short="${i}" style="flex:1">Versión corta</button>
+        </div>
       </div>
     </div>`;
   }
@@ -542,10 +548,210 @@
     else if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => toast('Resumen copiado'));
   }
 
-  /* ---------- Modo sesión (Fase 4, placeholder hasta esa fase) ---------- */
-  function startSessionMode(profile, plan, dayIndex, short) {
-    toast('Modo sesión: próximamente');
+  /* ---------- Modo sesión (Fase 4) ----------
+   * Pantalla a pantalla completa para usar en el gimnasio. No toca
+   * plan.training en ningún momento ("Versión corta" es solo una forma
+   * distinta de mostrarlo). Cada serie registrada se guarda al toque en
+   * profile.workouts (mismo localStorage que usa Progreso). */
+  let sm = null; // estado del modo sesión activo (o null si no hay ninguno)
+  let smWakeLock = null;
+  let smTimerInterval = null;
+  let smTimerState = null;
+
+  function parseRestSeconds(label) {
+    const m = String(label || '').match(/(\d+)/);
+    const n = m ? parseInt(m[1], 10) : 90;
+    return /min/.test(label || '') ? n * 60 : n;
   }
+  function fmtTimer(s) { const m = Math.floor(s / 60), r = s % 60; return `${m}:${String(r).padStart(2, '0')}`; }
+
+  // Misma fórmula que usa engine.js para la duración estimada (DEC-003 v2 /
+  // DEC-007), aplicada acá solo para mostrar el total de la versión corta;
+  // no cambia ningún cálculo del plan.
+  function exerciseDurationMin(e) {
+    const uf = e.unilateral ? 2 : 1;
+    let seconds = 0;
+    if (e.topSet) { seconds += uf * (180 + 45); seconds += uf * ((e.backoffSets || 0) * (150 + 45)); }
+    else { const rest = e.type === 'compound' ? 150 : 75; seconds += uf * (e.sets * (rest + 45)); }
+    return Math.round(seconds / 60);
+  }
+
+  function buildSmExercises(session, short) {
+    let list = session.exercises;
+    if (short) list = list.filter(e => e.type === 'compound').slice(0, 2);
+    return list.map(e => {
+      const sets = [];
+      if (e.topSet) {
+        sets.push({ setType: 'top', setNumber: 1, repsLabel: e.topSet.reps, restLabel: '3 min' });
+        for (let i = 0; i < (e.backoffSets || 0); i++) sets.push({ setType: 'backoff', setNumber: i + 1, repsLabel: e.reps, restLabel: e.rest });
+      } else {
+        for (let i = 0; i < e.sets; i++) sets.push({ setType: 'normal', setNumber: i + 1, repsLabel: e.reps, restLabel: e.rest });
+      }
+      return { name: e.name, muscle: e.muscle, muscleLabel: e.muscleLabel, type: e.type, unilateral: e.unilateral, durationMin: exerciseDurationMin(e), sets };
+    });
+  }
+
+  async function requestWakeLock() {
+    try { if ('wakeLock' in navigator) smWakeLock = await navigator.wakeLock.request('screen'); } catch (e) { /* no disponible o denegado: seguimos igual */ }
+  }
+  function releaseWakeLock() { try { if (smWakeLock) { smWakeLock.release(); smWakeLock = null; } } catch (e) { /* noop */ } }
+
+  function startSessionMode(profile, plan, dayIndex, short) {
+    const session = plan.training.sessions[dayIndex];
+    const exercises = buildSmExercises(session, short);
+    if (!exercises.length) { toast('Este día no tiene multiarticulares para la versión corta.'); return; }
+    sm = {
+      profileId: profile.id, sessionId: uid(), dayIndex, dayName: session.name, short,
+      exercises, exIndex: 0, startedAt: Date.now(), finished: false,
+      values: exercises.map(e => e.sets.map(() => ({ weight: '', reps: '', done: false }))),
+    };
+    requestWakeLock();
+    let root = document.getElementById('session-mode-root');
+    if (!root) { root = document.createElement('div'); root.id = 'session-mode-root'; document.body.appendChild(root); }
+    renderSessionMode(profile);
+  }
+
+  function endSessionMode() {
+    closeTimer();
+    releaseWakeLock();
+    const root = document.getElementById('session-mode-root');
+    if (root) root.remove();
+    sm = null;
+  }
+
+  function lastTimeFor(profile, exerciseName) {
+    const all = (profile.workouts || []).filter(w => w.exercise === exerciseName && w.sessionId !== sm.sessionId);
+    if (!all.length) return null;
+    let lastEntry = all[0];
+    all.forEach(w => { if (w.savedAt > lastEntry.savedAt) lastEntry = w; });
+    const sets = all.filter(w => w.sessionId === lastEntry.sessionId).sort((a, b) => (a.setType === 'top' ? -1 : b.setType === 'top' ? 1 : 0) || a.setNumber - b.setNumber);
+    return { date: lastEntry.date, sets };
+  }
+
+  function renderSessionMode(profile) {
+    const root = document.getElementById('session-mode-root');
+    if (!root || !sm) return;
+    if (sm.finished) { root.innerHTML = htmlSmSummary(profile); wireSmSummary(profile); return; }
+    const ex = sm.exercises[sm.exIndex];
+    const vals = sm.values[sm.exIndex];
+    const last = lastTimeFor(profile, ex.name);
+    const doneCount = sm.values.flat().filter(v => v.done).length;
+    const totalCount = sm.values.flat().length;
+    root.innerHTML = `
+      <div class="session-mode">
+        <div class="session-mode-head">
+          <button class="btn btn-icon" id="sm-close" aria-label="Cerrar sesión">✕</button>
+          <div class="prog">${sm.short ? 'Versión corta · ' : ''}Ejercicio ${sm.exIndex + 1} de ${sm.exercises.length} · ${doneCount}/${totalCount} series</div>
+          <button class="btn" id="sm-finish">Terminar</button>
+        </div>
+        <div class="session-mode-body">
+          <h2 class="sm-exname">${esc(ex.name)}</h2>
+          <div class="sm-exmeta">${esc(ex.muscleLabel)} ${sm.short ? `· ~${ex.durationMin} min` : ''}</div>
+          ${last ? `<div class="sm-last ${last.sets.some(s => s.setType === 'top') ? 'sm-last-top' : ''}">
+            <b>Última vez</b> (${fmtDate(last.date)}): ${last.sets.map(s => `${s.setType === 'top' ? '🏆 ' : ''}<span class="v">${n1(s.weight)} kg × ${s.reps}</span>`).join(' · ')}
+          </div>` : `<div class="sm-last">Primera vez que registrás este ejercicio.</div>`}
+          ${ex.sets.map((st, i) => htmlSmSet(st, i, vals[i])).join('')}
+        </div>
+        <div class="session-mode-foot">
+          <button class="btn btn-icon" id="sm-prev" ${sm.exIndex === 0 ? 'disabled' : ''} aria-label="Ejercicio anterior">‹</button>
+          <button class="btn btn-primary" id="sm-next" style="flex:1">${sm.exIndex === sm.exercises.length - 1 ? 'Finalizar ejercicios' : 'Siguiente ejercicio'}</button>
+          <button class="btn btn-icon" id="sm-next-arrow" ${sm.exIndex === sm.exercises.length - 1 ? 'disabled' : ''} aria-label="Ejercicio siguiente">›</button>
+        </div>
+      </div>`;
+    wireSessionMode(profile);
+  }
+
+  function htmlSmSet(st, i, v) {
+    const label = { top: 'Top set', backoff: 'Back-off', normal: `Serie ${st.setNumber}` }[st.setType];
+    return `<div class="sm-set ${v.done ? 'done' : ''}" data-set="${i}">
+      <div class="idx">${label === `Serie ${st.setNumber}` ? st.setNumber : (st.setType === 'top' ? '🏆' : '↓')}</div>
+      <div class="fieldwrap"><input type="number" inputmode="decimal" placeholder="kg" value="${v.weight || ''}" data-sm-weight="${i}" ${v.done ? 'disabled' : ''}><div class="unit">peso (kg)</div></div>
+      <div class="fieldwrap"><input type="number" inputmode="numeric" placeholder="${st.repsLabel}" value="${v.reps || ''}" data-sm-reps="${i}" ${v.done ? 'disabled' : ''}><div class="unit">reps (obj. ${esc(st.repsLabel)})</div></div>
+      <button class="btn ${v.done ? '' : 'btn-primary'} done-btn" data-sm-done="${i}" ${v.done ? 'disabled' : ''}>${v.done ? '✓' : 'Hecha'}</button>
+    </div>`;
+  }
+
+  function wireSessionMode(profile) {
+    const root = document.getElementById('session-mode-root');
+    $('#sm-close').onclick = () => { if (confirm('¿Salir del modo sesión? Lo ya registrado queda guardado.')) endSessionMode(); };
+    $('#sm-finish').onclick = () => { sm.finished = true; renderSessionMode(profile); };
+    $('#sm-prev').onclick = () => { sm.exIndex = Math.max(0, sm.exIndex - 1); renderSessionMode(profile); };
+    const next = () => {
+      if (sm.exIndex < sm.exercises.length - 1) { sm.exIndex++; renderSessionMode(profile); }
+      else { sm.finished = true; renderSessionMode(profile); }
+    };
+    $('#sm-next').onclick = next;
+    const nextArrow = $('#sm-next-arrow'); if (nextArrow) nextArrow.onclick = () => { if (sm.exIndex < sm.exercises.length - 1) { sm.exIndex++; renderSessionMode(profile); } };
+    root.querySelectorAll('[data-sm-weight]').forEach(inp => inp.oninput = () => { sm.values[sm.exIndex][Number(inp.dataset.smWeight)].weight = inp.value; });
+    root.querySelectorAll('[data-sm-reps]').forEach(inp => inp.oninput = () => { sm.values[sm.exIndex][Number(inp.dataset.smReps)].reps = inp.value; });
+    root.querySelectorAll('[data-sm-done]').forEach(btn => btn.onclick = () => smLogSet(profile, Number(btn.dataset.smDone)));
+  }
+
+  function smLogSet(profile, setIdx) {
+    const ex = sm.exercises[sm.exIndex], st = ex.sets[setIdx], v = sm.values[sm.exIndex][setIdx];
+    const reps = parseInt(v.reps, 10);
+    if (!reps || reps <= 0) { toast('Poné las repeticiones hechas.'); return; }
+    const weight = parseFloat(v.weight) || 0;
+    v.weight = weight; v.reps = reps; v.done = true;
+    profile.workouts = profile.workouts || [];
+    profile.workouts.push({
+      sessionId: sm.sessionId, date: todayIso(), dayIndex: sm.dayIndex, dayName: sm.dayName,
+      exercise: ex.name, muscle: ex.muscle, setType: st.setType, setNumber: st.setNumber,
+      weight, reps, short: sm.short, savedAt: Date.now(),
+    });
+    profile.updatedAt = todayIso();
+    save();
+    renderSessionMode(profile);
+    startRestTimer(st.restLabel);
+  }
+
+  function startRestTimer(restLabel) {
+    const total = parseRestSeconds(restLabel);
+    smTimerState = { remaining: total };
+    const root = document.getElementById('session-mode-root');
+    closeTimer();
+    const ov = document.createElement('div'); ov.className = 'timer-overlay'; ov.id = 'sm-timer';
+    ov.innerHTML = `<div class="timer-label">Descanso</div><div class="timer-num" id="sm-timer-num">${fmtTimer(total)}</div>
+      <div class="timer-actions"><button class="btn btn-lg" id="sm-timer-plus30">+30 s</button><button class="btn btn-primary btn-lg" id="sm-timer-skip">Saltar</button></div>`;
+    root.appendChild(ov);
+    $('#sm-timer-plus30').onclick = () => { smTimerState.remaining += 30; };
+    $('#sm-timer-skip').onclick = () => closeTimer();
+    smTimerInterval = setInterval(() => {
+      smTimerState.remaining -= 1;
+      const numEl = document.getElementById('sm-timer-num');
+      if (numEl) numEl.textContent = fmtTimer(Math.max(0, smTimerState.remaining));
+      if (smTimerState.remaining <= 0) { if (navigator.vibrate) navigator.vibrate([200, 100, 200]); closeTimer(); }
+    }, 1000);
+  }
+  function closeTimer() {
+    if (smTimerInterval) { clearInterval(smTimerInterval); smTimerInterval = null; }
+    const ov = document.getElementById('sm-timer'); if (ov) ov.remove();
+  }
+
+  function htmlSmSummary(profile) {
+    const flatVals = sm.values.flat();
+    const doneCount = flatVals.filter(v => v.done).length;
+    const pending = sm.exercises.filter((e, i) => sm.values[i].some(v => !v.done)).map(e => e.name);
+    const durationMin = Math.max(1, Math.round((Date.now() - sm.startedAt) / 60000));
+    const topSets = [];
+    sm.exercises.forEach((e, i) => e.sets.forEach((st, j) => { const v = sm.values[i][j]; if (st.setType === 'top' && v.done) topSets.push({ name: e.name, weight: v.weight, reps: v.reps }); }));
+    return `<div class="session-mode">
+      <div class="session-mode-head"><div></div><div class="prog">Resumen de la sesión</div><div></div></div>
+      <div class="session-mode-body">
+        <div class="card accent">
+          <h2>${esc(sm.dayName)} ${sm.short ? '· versión corta' : ''}</h2>
+          <div class="grid">
+            <div class="stat"><div class="v">${doneCount}</div><div class="l">series hechas</div></div>
+            <div class="stat"><div class="v">${durationMin}</div><div class="l">min reales</div></div>
+          </div>
+        </div>
+        ${topSets.length ? `<div class="card"><h3>Top sets del día</h3><ul>${topSets.map(t => `<li><b>${esc(t.name)}</b>: ${n1(t.weight)} kg × ${t.reps}</li>`).join('')}</ul></div>` : ''}
+        ${pending.length ? `<div class="card"><h3>Ejercicios con series sin terminar</h3><ul>${pending.map(n => `<li>${esc(n)}</li>`).join('')}</ul></div>` : '<div class="card"><p class="muted">Todas las series quedaron registradas. ¡Bien ahí!</p></div>'}
+        <button class="btn btn-primary btn-block btn-lg" id="sm-back-to-plan">Volver al plan</button>
+      </div>
+    </div>`;
+  }
+  function wireSmSummary() { $('#sm-back-to-plan').onclick = () => { endSessionMode(); render(); }; }
 
   /* ---------- Progreso ---------- */
   function renderProgress() {
