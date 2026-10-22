@@ -18,10 +18,10 @@ Este archivo es la fuente de verdad de la lógica de negocio. Antes de cambiar c
 ## DEC-002 · Top set de fuerza en definición
 - Solo en fase de definición: el primer multiarticular de cada día arranca con 1 serie × 4-6 reps @ RIR 1-2, y luego las series de back-off con −10% de carga en el rango normal.
 - Mostrarlo en el plan como una línea separada ("Top set").
-- Respaldo: [Evidencia] Helms et al. 2015; [Posicionamiento] ACSM 2009.
+- Respaldo: Formato top set/back-off: [Criterio], construido sobre [Evidencia] Helms et al. 2015, Bickel, Cross & Bamman 2011, Spiering et al. 2021 y [Posicionamiento] ACSM 2009.
 - Test: en definición aparece el top set; en volumen/mantenimiento no.
 
-**Estado: implementada.**
+**Estado: implementada.** Fuentes agregadas a la pestaña Fuentes: `BICKEL_2011`, `SPIERING_2021`.
 
 ## DEC-003 · Tope por sesión
 - Parámetro configurable: máximo de series por sesión (default 25).

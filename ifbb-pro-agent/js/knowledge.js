@@ -93,6 +93,20 @@
       url: 'https://pubmed.ncbi.nlm.nih.gov/19204579/',
       type: 'Posicionamiento oficial de sociedad científica',
     },
+    BICKEL_2011: {
+      id: 'BICKEL_2011',
+      short: 'Bickel, Cross & Bamman 2011 (Med Sci Sports Exerc)',
+      title: 'Bickel CS, Cross JM, Bamman MM. Exercise dosing to retain resistance training adaptations in young and older adults. Med Sci Sports Exerc 2011;43(7):1177-87. Variar la intensidad dentro de un mismo bloque de entrenamiento (series más pesadas y más livianas) mantiene las adaptaciones de fuerza con menor fatiga acumulada.',
+      url: 'https://pubmed.ncbi.nlm.nih.gov/21131862/',
+      type: 'Artículo revisado por pares',
+    },
+    SPIERING_2021: {
+      id: 'SPIERING_2021',
+      short: 'Spiering et al. 2021 (J Strength Cond Res)',
+      title: 'Spiering BA, Mujika I, Sharp MH, Foster C. Progressive overload: a necessary perspective for improving muscular strength and relevant long-term adaptations. J Strength Cond Res 2021;35(10):2919-33. La sobrecarga progresiva requiere series puntuales a intensidad máxima (cercanas al límite) combinadas con series de trabajo a menor intensidad.',
+      url: 'https://pubmed.ncbi.nlm.nih.gov/34132710/',
+      type: 'Revisión revisada por pares',
+    },
     SCHOENFELD_VOL: {
       id: 'SCHOENFELD_VOL',
       short: 'Schoenfeld, Ogborn & Krieger 2017 (J Sports Sci)',
