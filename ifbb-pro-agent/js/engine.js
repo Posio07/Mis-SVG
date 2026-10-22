@@ -326,6 +326,28 @@
     triceps: cat => ['torso', 'push', 'full'].includes(cat),
   };
 
+  // DEC-009 · Capa 3: filtra el catálogo de un grupo muscular según las
+  // zonas de lesión declaradas (K.INJURY_EXCLUSIONS, documentado en
+  // DECISIONS.md). Sin lesiones declaradas, devuelve el catálogo tal cual
+  // (mismo comportamiento que antes de DEC-009). Un ejercicio marcado
+  // `injuryOnly: 'zona'` solo entra en el catálogo cuando esa zona está
+  // declarada (es el caso del sustituto de press de hombro).
+  function filterLibByInjuries(lib, muscle, zones) {
+    zones = zones || [];
+    // Sin excluir nada, igual hay que sacar los ejercicios `injuryOnly`:
+    // solo deben aparecer cuando esa zona está declarada.
+    const excluded = new Set();
+    zones.forEach(z => {
+      const map = K.INJURY_EXCLUSIONS && K.INJURY_EXCLUSIONS[z];
+      if (map && map[muscle]) map[muscle].forEach(pat => excluded.add(pat));
+    });
+    return lib.filter(ex => {
+      if (excluded.has(ex.pattern)) return false;
+      if (ex.injuryOnly && zones.indexOf(ex.injuryOnly) === -1) return false;
+      return true;
+    });
+  }
+
   // DEC-008: multiarticulares bilaterales con carga libre o guiada pesada
   // (ACSM 2009, cargas ≥80% 1RM para fuerza). Lista cerrada a propósito:
   // sentadilla trasera/hack, press banca, press militar, peso muerto
@@ -386,6 +408,7 @@
     const emph = EMPHASIS_MAP[p.division] || { up: [], down: [] };
     const small = ['biceps', 'triceps', 'calves', 'abs'];
     const lagging = new Set(p.laggingMuscles || []); // DEC-001
+    const injuryZones = (p.health && p.health.injuries || []).map(i => i.zone); // DEC-009
 
     const weeklySets = {};
     const laggingApplied = {};
@@ -419,8 +442,8 @@
         // sentadilla búlgara, step-up con carga y paseo del granjero a su
         // rotación de ejercicios. Desactivada (por defecto), el catálogo es
         // el mismo de siempre.
-        const extra = p.healthGoal ? (K.FUNCTIONAL_EXERCISES[mu] || []) : [];
-        const lib = K.EXERCISES[mu];
+        const extra = p.healthGoal ? filterLibByInjuries(K.FUNCTIONAL_EXERCISES[mu] || [], mu, injuryZones) : [];
+        const lib = filterLibByInjuries(K.EXERCISES[mu], mu, injuryZones); // DEC-009
         const perSession = Math.max(2, Math.round(weeklySets[mu] / freq[mu]));
         const sets = Math.min(perSession, Math.max(0, remaining[mu]));
         remaining[mu] -= sets;
@@ -502,7 +525,7 @@
       const freqMu = Math.min(2, eligible.length);
       freq[mu] = freqMu;
       const chosen = eligible.slice(0, freqMu).map(x => x.i);
-      const lib = K.EXERCISES[mu];
+      const lib = filterLibByInjuries(K.EXERCISES[mu], mu, injuryZones); // DEC-009
       const perSession = Math.max(2, Math.round(weeklySets[mu] / freqMu));
       let remainingMu = weeklySets[mu];
       chosen.forEach((dayIdx, k) => {
@@ -604,6 +627,65 @@
     };
   }
 
+  /* ---------- DEC-009: tamizaje de salud ---------- */
+
+  // PRINCIPIO RECTOR: esta función solo informa/bloquea según reglas con
+  // respaldo cargado (ver DECISIONS.md). No inventa ajustes para
+  // condiciones sin regla: esas quedan solo registradas, sin efecto.
+  function computeHealthScreen(p) {
+    const h = p.health;
+    const warnings = [];
+    const sources = [];
+
+    // Capa 1 (ACSM / Riebe et al. 2015): el plan de la app se trata como
+    // ejercicio de intensidad vigorosa a estos efectos.
+    let blocked = false, blockReason = null, medicalClearanceRecommended = false;
+    if (h.screening.symptoms || h.screening.cvMetabolicRenal) sources.push('RIEBE_2015');
+    if (h.screening.symptoms) {
+      blockReason = 'Indicaste tener síntomas de alarma (dolor en el pecho, falta de aire en reposo, mareo, palpitaciones u otros). Suspendé el ejercicio y consultá a un médico antes de continuar.';
+      blocked = !h.screening.medicalClearance;
+    } else if (h.screening.cvMetabolicRenal && !h.screening.regularExercise) {
+      blockReason = 'Indicaste una condición cardiovascular, metabólica o renal y no entrenás de forma regular en los últimos 3 meses. Se recomienda autorización médica antes de empezar.';
+      blocked = !h.screening.medicalClearance;
+    } else if (h.screening.cvMetabolicRenal && h.screening.regularExercise) {
+      medicalClearanceRecommended = true;
+      warnings.push({ level: 'warn', text: 'Autorización médica recomendada antes de entrenar a intensidad vigorosa (vigente en los últimos 12 meses), por la condición cardiovascular, metabólica o renal indicada.' });
+    }
+
+    // Capa 2 (ADA/Colberg 2016, ACSM/Kanaley 2022): solo informa, nunca
+    // cambia volumen, calorías ni ejercicios.
+    let diabetesWarning = null, weightLossMedWarning = null;
+    if (h.diabetes.type !== 'none' && h.diabetes.medication) {
+      sources.push('COLBERG_2016', 'KANALEY_2022');
+      diabetesWarning = 'Usás insulina u otro fármaco que baja la glucosa: hay riesgo de hipoglucemia asociada al ejercicio. Controlá tu glucosa antes y después de entrenar, llevá contigo un carbohidrato de acción rápida y reconocé los síntomas de hipoglucemia.';
+      warnings.push({ level: 'warn', text: diabetesWarning });
+      if (p.goal === 'cut') {
+        weightLossMedWarning = 'La pérdida de peso en esta fase puede requerir ajustar tu medicación para la diabetes: consultalo con tu médico antes de empezar.';
+        warnings.push({ level: 'warn', text: weightLossMedWarning });
+      }
+    }
+
+    // Capa 3 (lesiones): aviso de evaluación profesional cuando no hay
+    // diagnóstico. La exclusión de ejercicios (filterLibByInjuries) ya se
+    // aplicó en computeTraining; acá solo se arma el aviso y el resumen.
+    const injuries = h.injuries || [];
+    if (injuries.length) sources.push('SILBERNAGEL_2007');
+    injuries.forEach(inj => {
+      if (!inj.diagnosed) {
+        const label = (K.INJURY_LABELS && K.INJURY_LABELS[inj.zone]) || inj.zone;
+        warnings.push({ level: 'info', text: `${label}: te recomendamos una evaluación profesional; mientras tanto, se excluyen los ejercicios que suelen cargar esta zona.` });
+      }
+    });
+
+    const anyCondition = h.screening.cvMetabolicRenal || h.screening.symptoms || h.diabetes.type !== 'none' || injuries.length > 0;
+    return {
+      blocked, blockReason, medicalClearanceRecommended, diabetesWarning, weightLossMedWarning,
+      injuries, anyCondition,
+      disclaimer: anyCondition ? 'Estas adaptaciones aplican posicionamientos científicos oficiales y no reemplazan la valoración de un médico, fisioterapeuta o entrenador certificado.' : null,
+      warnings, sources: unique(sources),
+    };
+  }
+
   /* ---------- Plan completo ---------- */
 
   function buildPlan(profile, todayIso) {
@@ -613,12 +695,37 @@
     const targets = computeTargets(p, metrics, today);
     const nutrition = computeNutrition(p, metrics, targets);
     const training = computeTraining(p, targets);
+    const health = computeHealthScreen(p); // DEC-009: no cambia metrics/targets/nutrition; training ya filtró ejercicios por lesión arriba.
     const supplements = K.SUPPLEMENTS.filter(s => p.goal !== 'bulk' || s.source !== 'HELMS_NUT');
-    const warnings = [].concat(metrics.warnings, targets.warnings, nutrition.warnings, training.warnings);
-    const sourcesUsed = unique([metrics.bmrMethod, 'NAVY', 'KOURI', 'ACE_BF', 'ASHWELL', 'ROSSOW', 'IFBB_RULES'].concat(nutrition.sources, training.sources, supplements.map(s => s.source)));
+    const warnings = [].concat(metrics.warnings, targets.warnings, nutrition.warnings, training.warnings, health.warnings);
+    const sourcesUsed = unique([metrics.bmrMethod, 'NAVY', 'KOURI', 'ACE_BF', 'ASHWELL', 'ROSSOW', 'IFBB_RULES'].concat(nutrition.sources, training.sources, supplements.map(s => s.source), health.sources));
     return {
-      generatedAt: today, input: p, metrics, targets, nutrition, training, supplements, warnings, sourcesUsed,
+      generatedAt: today, input: p, metrics, targets, nutrition, training, health, supplements, warnings, sourcesUsed,
       disclaimer: 'Esta app aplica recomendaciones publicadas en revisiones por pares y posicionamientos oficiales de sociedades científicas. No sustituye la valoración de un médico, un dietista-nutricionista colegiado ni un entrenador certificado. Ante enfermedad, embarazo, trastornos alimentarios o uso de fármacos, consulta antes de aplicar cualquier plan.',
+    };
+  }
+
+  // DEC-009: reconstruye los datos de salud desde los campos planos del
+  // formulario (mismo patrón que laggingMuscles/availablePlates: grupos de
+  // checkboxes que comparten `name`, reunidos acá en listas/objetos).
+  function normalizeHealth(src) {
+    src = src || {};
+    const toList = v => Array.isArray(v) ? v : (v ? [v] : []);
+    const validZones = (K.INJURY_ZONES || []);
+    const zones = unique(toList(src.injuryZones).filter(z => validZones.indexOf(z) !== -1));
+    const diagnosedSet = new Set(toList(src.injuryDiagnosed));
+    const painSet = new Set(toList(src.injuryPainNow));
+    const injuries = zones.map(zone => ({ zone, diagnosed: diagnosedSet.has(zone), painNow: painSet.has(zone) }));
+    const diabetesType = ['type1', 'type2'].indexOf(src.diabetesType) !== -1 ? src.diabetesType : 'none';
+    return {
+      screening: {
+        regularExercise: !!src.healthRegularExercise,
+        cvMetabolicRenal: !!src.healthCvMetabolicRenal,
+        symptoms: !!src.healthSymptoms,
+        medicalClearance: !!src.healthMedicalClearance,
+      },
+      diabetes: { type: diabetesType, medication: !!src.healthDiabetesMed },
+      injuries,
     };
   }
 
@@ -640,6 +747,7 @@
       division, goal: ['cut', 'bulk', 'maintain'].includes(src.goal) ? src.goal : 'cut',
       targetDate: src.targetDate || '', targetBf: n(src.targetBf), classicLimitLb: n(src.classicLimitLb),
       laggingMuscles, healthGoal: !!src.healthGoal,
+      health: normalizeHealth(src), // DEC-009
       // Fase 5: ajustes de la barra cargada. No participan de ningún cálculo
       // de volumen/calorías/selección de ejercicios, solo de la vista de
       // discos del modo sesión.
@@ -665,5 +773,5 @@
 
   function unique(arr) { return arr.filter((v, i) => v && arr.indexOf(v) === i); }
 
-  return { bmrMifflin, bmrKatch, bodyFatNavy, ffmi, classicLimit, computeMetrics, computeTargets, computeNutrition, computeTraining, buildPlan, normalizeProfile, validateProfile, SPLITS, LB_PER_KG };
+  return { bmrMifflin, bmrKatch, bodyFatNavy, ffmi, classicLimit, computeMetrics, computeTargets, computeNutrition, computeTraining, computeHealthScreen, buildPlan, normalizeProfile, validateProfile, SPLITS, LB_PER_KG };
 });
