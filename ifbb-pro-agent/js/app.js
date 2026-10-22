@@ -724,7 +724,7 @@
     const findLast = (type, num) => last && last.sets.find(s => s.setType === type && s.setNumber === num);
     if (hasTop) {
       const topW = findLast('top', 1); const boW = findLast('backoff', 1);
-      return `<div class="card" style="margin-bottom:.8rem"><h3 style="font-size:.85rem;margin-bottom:.3rem">Carga · Top set</h3>${htmlPlateBar(profile, ex.pattern, topW && topW.weight)}</div>` +
+      return `<div class="card" id="platebar-top" style="margin-bottom:.8rem"><h3 style="font-size:.85rem;margin-bottom:.3rem">Carga · Top set</h3>${htmlPlateBar(profile, ex.pattern, topW && topW.weight)}</div>` +
         (ex.sets.some(s => s.setType === 'backoff') ? `<div class="card" style="margin-bottom:.8rem"><h3 style="font-size:.85rem;margin-bottom:.3rem">Carga · Back-off</h3>${htmlPlateBar(profile, ex.pattern, boW && boW.weight)}</div>` : '');
     }
     const firstW = findLast('normal', 1);
@@ -886,6 +886,39 @@
     save();
     renderSessionMode(profile);
     startRestTimer(st.restLabel);
+    if (st.setType === 'top') maybeShowRecord(profile, ex, weight, reps);
+  }
+
+  /* Fase 5: "nuevo récord" es puramente informativo para motivar en el
+   * momento (no toca el plan ni ninguna regla): compara el 1RM estimado
+   * del top set recién logueado, con la fórmula de Epley, contra el
+   * mejor 1RM estimado del mismo ejercicio en sesiones ANTERIORES
+   * (nunca la actual). Máximo una vez por ejercicio y por sesión. */
+  function maybeShowRecord(profile, ex, weight, reps) {
+    sm.recordShown = sm.recordShown || new Set();
+    if (sm.recordShown.has(ex.name) || !weight) return;
+    const prior = (profile.workouts || []).filter(w => w.exercise === ex.name && w.setType === 'top' && w.sessionId !== sm.sessionId);
+    if (!prior.length) return;
+    const epley = (w, r) => w * (1 + r / 30);
+    const priorBest = Math.max(...prior.map(w => epley(w.weight, w.reps)));
+    if (epley(weight, reps) <= priorBest) return;
+    sm.recordShown.add(ex.name);
+    showRecordMoment(profile, weight, reps);
+  }
+
+  function showRecordMoment(profile, weight, reps) {
+    if (navigator.vibrate) navigator.vibrate([90, 70, 90]);
+    const bar = document.getElementById('platebar-top');
+    if (bar) { bar.classList.add('plate-bounce'); setTimeout(() => bar.classList.remove('plate-bounce'), 550); }
+    const root = document.getElementById('session-mode-root');
+    if (!root) return;
+    const unit = profile.data.plateUnit || 'kg';
+    const banner = document.createElement('div');
+    banner.className = 'record-banner';
+    banner.innerHTML = `${icon('trophy')}<span>Nuevo récord: ${n1(weight)} ${unit} × ${reps}</span>`;
+    root.appendChild(banner);
+    requestAnimationFrame(() => requestAnimationFrame(() => banner.classList.add('show')));
+    setTimeout(() => { banner.classList.remove('show'); setTimeout(() => banner.remove(), 300); }, 2000);
   }
 
   const TIMER_RING_R = 52;

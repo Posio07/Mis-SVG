@@ -293,6 +293,16 @@ li { margin-bottom: .25rem; }
 @keyframes plate-slide-l { from { transform: translateX(-14px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 @keyframes plate-slide-r { from { transform: translateX(14px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 
+/* Fase 5: momento de nuevo récord. Los discos del top set golpean con un
+ * rebote corto y aparece un cartel con el trofeo durante 2s. */
+@media (prefers-reduced-motion: no-preference) { #platebar-top.plate-bounce .platebar { animation: plate-bounce 550ms var(--ease-salida); } }
+@keyframes plate-bounce { 0% { transform: translateY(0); } 28% { transform: translateY(-5px); } 52% { transform: translateY(0); } 72% { transform: translateY(-2px); } 100% { transform: translateY(0); } }
+.record-banner { position: fixed; left: 50%; top: 16%; transform: translate(-50%, -10px); opacity: 0; display: flex; align-items: center; gap: .5rem; background: var(--disco-amarillo); color: #23270a; font-weight: 700; font-size: .95rem; padding: .7rem 1.1rem; border-radius: 999px; box-shadow: 0 8px 20px rgba(0,0,0,.4); z-index: 60; pointer-events: none; }
+.record-banner .icon { width: 1.3rem; height: 1.3rem; }
+.record-banner.show { opacity: 1; transform: translate(-50%, 0); }
+@media (prefers-reduced-motion: no-preference) { .record-banner { transition: opacity var(--dur-media) var(--ease-salida), transform var(--dur-media) var(--ease-salida); } }
+@media (prefers-reduced-motion: reduce) { .record-banner { transition: opacity var(--dur-rapida) linear; } }
+
 .modal-overlay { position: fixed; inset: 0; z-index: 50; background: rgba(35,39,43,.75); display: flex; align-items: center; justify-content: center; padding: 1rem; }
 .modal-card { background: var(--superficie); border-radius: var(--radius); padding: 1.2rem; max-width: 360px; width: 100%; }
 .modal-card p { margin: 0 0 1rem; color: var(--tiza); }
