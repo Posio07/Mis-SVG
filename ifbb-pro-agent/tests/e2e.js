@@ -111,6 +111,8 @@ const server = http.createServer((req, res) => {
   if (rows < 3) throw new Error('log rows missing');
   await shot('05-progress');
   await page.click('#btn-apply');
+  await page.waitForSelector('.modal-overlay');
+  await page.click('#modal-confirm');
   await page.waitForSelector('#plan-body .stat');
   const w = await page.evaluate(() => JSON.parse(localStorage.getItem('ifbb-agent:v1')).profiles[0].data.weightKg);
   if (w !== 83.2) throw new Error('apply last measurement failed: ' + w);

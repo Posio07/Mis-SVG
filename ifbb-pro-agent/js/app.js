@@ -30,6 +30,7 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const n1 = v => (Math.round(v * 10) / 10).toLocaleString('es');
   const n0 = v => Math.round(v).toLocaleString('es');
+  const n2 = v => (Math.round(v * 100) / 100).toLocaleString('es', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtDate = iso => { const d = new Date(iso + 'T00:00:00'); return isNaN(d) ? iso : d.toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric' }); };
   const cite = ids => (Array.isArray(ids) ? ids : [ids]).map(id => `<span class="cite" title="${esc(KNOWLEDGE.SOURCES[id] ? KNOWLEDGE.SOURCES[id].short : id)}">${esc(id)}</span>`).join('');
 
@@ -37,6 +38,27 @@
   function toast(msg) {
     const t = $('#toast'); t.textContent = msg; t.classList.add('show');
     clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+  }
+
+  /* Modal de confirmación con botones a medida (en vez de confirm() nativo,
+   * para poder rotular "Recalcular"/"Cancelar" como pide la Fase 6). */
+  function confirmModal(message, { confirmLabel = 'Continuar', cancelLabel = 'Cancelar' } = {}) {
+    return new Promise(resolve => {
+      const root = document.createElement('div');
+      root.className = 'modal-overlay';
+      root.innerHTML = `<div class="modal-card">
+        <p>${esc(message)}</p>
+        <div class="btn-row">
+          <button class="btn" id="modal-cancel">${esc(cancelLabel)}</button>
+          <button class="btn btn-primary" id="modal-confirm">${esc(confirmLabel)}</button>
+        </div>
+      </div>`;
+      document.body.appendChild(root);
+      const close = ok => { root.remove(); resolve(ok); };
+      root.querySelector('#modal-cancel').onclick = () => close(false);
+      root.querySelector('#modal-confirm').onclick = () => close(true);
+      root.addEventListener('click', e => { if (e.target === root) close(false); });
+    });
   }
 
   /* ---------- Navegación ---------- */
@@ -845,13 +867,16 @@
     if (!p) { view.innerHTML = '<div class="empty"><div class="big">📈</div><p>Abre un perfil para registrar su progreso.</p></div>'; return; }
     const plan = ENGINE.buildPlan(p.data, todayIso());
     const log = (p.log || []).slice().sort((a, b) => a.date.localeCompare(b.date));
+    const workouts = p.workouts || [];
+    const exNames = [...new Set(workouts.map(w => w.exercise))];
+    if (!ui.strengthExercise || !exNames.includes(ui.strengthExercise)) ui.strengthExercise = exNames[0] || null;
     view.innerHTML = `
       <div class="card accent">
         <h2>Progreso · ${esc(p.data.name)}</h2>
         <form id="log-form">
           <div class="row2">
+            <div><label>Peso (kg)</label><input name="weightKg" type="number" step="0.1" inputmode="decimal" required autofocus></div>
             <div><label>Fecha</label><input name="date" type="date" value="${todayIso()}" required></div>
-            <div><label>Peso (kg)</label><input name="weightKg" type="number" step="0.1" inputmode="decimal" required></div>
           </div>
           <div class="row3">
             <div><label>% grasa</label><input name="bodyFatPct" type="number" step="0.1" inputmode="decimal"></div>
@@ -860,21 +885,25 @@
           </div>
           <div class="row2">
             <div><label>Cadera (cm)</label><input name="hipCm" type="number" step="0.5" inputmode="decimal"></div>
-            <div><label>Notas</label><input name="notes" placeholder="energía, fuerza, sueño…"></div>
           </div>
+          <div><label>Notas</label><input name="notes" placeholder="energía, fuerza, sueño…" style="width:100%"></div>
           <div class="btn-row"><button class="btn btn-primary btn-block" type="submit">Guardar medición</button></div>
         </form>
       </div>
       <div class="card">
         <h3>Peso vs. objetivo</h3>
-        ${chart(log, plan)}
-        <p class="help">Línea roja: peso objetivo (${n1(plan.targets.targetWeight)} kg). Ritmo previsto: ${plan.input.goal === 'cut' ? '−' : '+'}${n1(plan.targets.rateKg * 1000)} g/semana.</p>
+        ${weightChart(log, plan)}
+        <p class="help">${rateLabel(plan)}</p>
+      </div>
+      <div class="card">
+        <h3>Fuerza</h3>
+        ${strengthSection(workouts)}
       </div>
       <div class="card">
         <h3>Historial</h3>
         ${log.length ? `<table><tr><th>Fecha</th><th class="num">Peso</th><th class="num">% grasa</th><th class="num">Cintura</th><th></th></tr>
         ${log.slice().reverse().map((e, i) => `<tr><td>${fmtDate(e.date)}<br><small>${esc(e.notes || '')}</small></td><td class="num">${n1(e.weightKg)} kg</td><td class="num">${e.bodyFatPct ? n1(e.bodyFatPct) + ' %' : '—'}</td><td class="num">${e.waistCm ? n1(e.waistCm) : '—'}</td><td class="num"><button class="btn btn-ghost" data-del="${log.length - 1 - i}" title="Eliminar">✕</button></td></tr>`).join('')}</table>` : '<p class="muted">Sin mediciones todavía.</p>'}
-        ${log.length ? '<div class="btn-row"><button class="btn" id="btn-apply">Usar la última medición como datos actuales y recalcular</button></div>' : ''}
+        ${log.length ? '<div class="btn-row"><button class="btn" id="btn-apply">Usar la última medición y recalcular</button></div>' : ''}
       </div>`;
 
     $('#log-form').onsubmit = e => {
@@ -889,8 +918,12 @@
       const idx = Number(b.dataset.del); const sorted = log; const target = sorted[idx];
       p.log = p.log.filter(x => x !== target); save(); renderProgress();
     });
+    const sel = $('#strength-exercise-select');
+    if (sel) sel.onchange = () => { ui.strengthExercise = sel.value; renderProgress(); };
     const apply = $('#btn-apply');
-    if (apply) apply.onclick = () => {
+    if (apply) apply.onclick = async () => {
+      const ok = await confirmModal('Esto recalcula calorías y proteína del plan. ¿Continuar?', { confirmLabel: 'Recalcular', cancelLabel: 'Cancelar' });
+      if (!ok) return;
       const last = log[log.length - 1];
       p.data.weightKg = last.weightKg;
       if (last.bodyFatPct) p.data.bodyFatPct = last.bodyFatPct;
@@ -901,24 +934,92 @@
     };
   }
 
-  function chart(log, plan) {
-    const W = 340, H = 160, L = 36, R = 8, T = 10, B = 24;
+  function rateLabel(plan) {
+    if (plan.input.goal === 'maintain') return 'Mantenimiento: sin ritmo de cambio de peso proyectado.';
+    const sign = plan.input.goal === 'cut' ? '−' : '+';
+    return `Ritmo previsto: ${sign}${n2(Math.abs(plan.targets.rateKg))} kg/semana · objetivo ${n1(plan.targets.targetWeight)} kg.`;
+  }
+
+  function weightChart(log, plan) {
+    const W = 340, H = 180, L = 40, R = 10, T = 10, B = 24;
+    if (log.length < 2) return `<p class="muted">Registrá tu peso 3-4 veces por semana, en ayunas, para ver la tendencia.</p>`;
     const target = plan.targets.targetWeight;
-    if (log.length === 0) return `<svg class="chart" viewBox="0 0 ${W} ${H}"><text x="${W / 2}" y="${H / 2}" text-anchor="middle">Registra mediciones para ver la gráfica</text></svg>`;
     const xs = log.map(e => new Date(e.date + 'T00:00:00').getTime());
     const ys = log.map(e => e.weightKg);
-    const x0 = Math.min(...xs), x1 = Math.max(...xs, x0 + 7 * 86400000);
-    const yMin = Math.min(...ys, target) - 1, yMax = Math.max(...ys, target) + 1;
+    const projecting = plan.input.goal !== 'maintain';
+    const estDate = new Date(plan.targets.estimatedDate + 'T00:00:00').getTime();
+    const x0 = Math.min(...xs), x1 = Math.max(...xs, x0 + 7 * 86400000, projecting ? estDate : x0);
+    const yVals = projecting ? [...ys, target] : ys;
+    const yMin = Math.min(...yVals) - 1, yMax = Math.max(...yVals) + 1;
     const X = x => L + (x - x0) / (x1 - x0) * (W - L - R);
     const Y = y => T + (yMax - y) / (yMax - yMin) * (H - T - B);
-    const path = log.map((e, i) => `${i ? 'L' : 'M'}${X(xs[i]).toFixed(1)},${Y(ys[i]).toFixed(1)}`).join(' ');
-    const dots = log.map((e, i) => `<circle class="dot" cx="${X(xs[i]).toFixed(1)}" cy="${Y(ys[i]).toFixed(1)}" r="3"><title>${fmtDate(e.date)}: ${n1(e.weightKg)} kg</title></circle>`).join('');
+
+    // Pesajes casi diarios (mediana del intervalo entre mediciones <= 2 días):
+    // la línea principal pasa a ser la media móvil de 7 días, y cada pesaje
+    // individual queda como punto tenue de fondo.
+    const gaps = []; for (let i = 1; i < xs.length; i++) gaps.push((xs[i] - xs[i - 1]) / 86400000);
+    gaps.sort((a, b) => a - b);
+    const medianGap = gaps.length ? gaps[Math.floor(gaps.length / 2)] : Infinity;
+    const nearDaily = log.length >= 5 && medianGap <= 2;
+
+    let mainPath, dotsHtml;
+    if (nearDaily) {
+      const ma = log.map((e, i) => {
+        const windowStart = xs[i] - 6 * 86400000;
+        const inWindow = log.filter((_, j) => xs[j] >= windowStart && xs[j] <= xs[i]);
+        return inWindow.reduce((s, x) => s + x.weightKg, 0) / inWindow.length;
+      });
+      mainPath = ma.map((y, i) => `${i ? 'L' : 'M'}${X(xs[i]).toFixed(1)},${Y(y).toFixed(1)}`).join(' ');
+      dotsHtml = log.map((e, i) => `<circle class="dot-faint" cx="${X(xs[i]).toFixed(1)}" cy="${Y(e.weightKg).toFixed(1)}" r="2.2"><title>${fmtDate(e.date)}: ${n1(e.weightKg)} kg</title></circle>`).join('');
+    } else {
+      mainPath = log.map((e, i) => `${i ? 'L' : 'M'}${X(xs[i]).toFixed(1)},${Y(e.weightKg).toFixed(1)}`).join(' ');
+      dotsHtml = log.map((e, i) => `<circle class="dot" cx="${X(xs[i]).toFixed(1)}" cy="${Y(e.weightKg).toFixed(1)}" r="3"><title>${fmtDate(e.date)}: ${n1(e.weightKg)} kg</title></circle>`).join('');
+    }
+    const projection = projecting ? `<line class="line2" x1="${X(xs[0]).toFixed(1)}" y1="${Y(ys[0]).toFixed(1)}" x2="${X(estDate).toFixed(1)}" y2="${Y(target).toFixed(1)}"/>` : '';
     const ticks = [yMin + 1, (yMin + yMax) / 2, yMax - 1].map(v => `<text x="${L - 4}" y="${Y(v) + 3}" text-anchor="end">${n1(v)}</text>`).join('');
     return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Evolución del peso">
       <line class="axis" x1="${L}" y1="${T}" x2="${L}" y2="${H - B}"/><line class="axis" x1="${L}" y1="${H - B}" x2="${W - R}" y2="${H - B}"/>
       <line class="target" x1="${L}" y1="${Y(target)}" x2="${W - R}" y2="${Y(target)}"/>
-      ${ticks}<path class="line" d="${path}"/>${dots}
+      ${projection}
+      ${ticks}<path class="line" d="${mainPath}"/>${dotsHtml}
       <text x="${L}" y="${H - 6}">${fmtDate(log[0].date)}</text><text x="${W - R}" y="${H - 6}" text-anchor="end">${fmtDate(log[log.length - 1].date)}</text>
+    </svg>`;
+  }
+
+  function strengthSection(workouts) {
+    if (!workouts.length) return '<p class="muted">Completá dos sesiones para ver tu evolución de fuerza.</p>';
+    const names = [...new Set(workouts.map(w => w.exercise))];
+    const selector = `<select id="strength-exercise-select">${names.map(n => `<option value="${esc(n)}" ${n === ui.strengthExercise ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>`;
+    const points = strengthPointsFor(workouts, ui.strengthExercise);
+    if (points.length < 2) return `${selector}<p class="muted">Completá dos sesiones para ver tu evolución de fuerza.</p>`;
+    return `${selector}${strengthChart(points)}<p class="help">Marca hueca = sesión corta.</p>`;
+  }
+
+  function strengthPointsFor(workouts, exerciseName) {
+    const byDate = {};
+    workouts.filter(w => w.exercise === exerciseName).forEach(w => { (byDate[w.date] = byDate[w.date] || []).push(w); });
+    return Object.keys(byDate).sort().map(date => {
+      const sets = byDate[date];
+      const best = sets.find(s => s.setType === 'top') || sets.slice().sort((a, b) => b.weight - a.weight)[0];
+      return { date, weight: best.weight, reps: best.reps, short: sets.some(s => s.short) };
+    });
+  }
+
+  function strengthChart(points) {
+    const W = 340, H = 160, L = 36, R = 8, T = 10, B = 24;
+    const xs = points.map(p => new Date(p.date + 'T00:00:00').getTime());
+    const ys = points.map(p => p.weight);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs, x0 + 7 * 86400000);
+    const yMin = Math.min(...ys) - 2.5, yMax = Math.max(...ys) + 2.5;
+    const X = x => L + (x - x0) / (x1 - x0) * (W - L - R);
+    const Y = y => T + (yMax - y) / (yMax - yMin) * (H - T - B);
+    const path = points.map((p, i) => `${i ? 'L' : 'M'}${X(xs[i]).toFixed(1)},${Y(ys[i]).toFixed(1)}`).join(' ');
+    const dots = points.map((p, i) => `<circle class="${p.short ? 'dot-short' : 'dot'}" cx="${X(xs[i]).toFixed(1)}" cy="${Y(ys[i]).toFixed(1)}" r="3.5"><title>${fmtDate(p.date)}: ${n1(p.weight)} kg × ${p.reps}${p.short ? ' (sesión corta)' : ''}</title></circle>`).join('');
+    const ticks = [yMin + 1, (yMin + yMax) / 2, yMax - 1].map(v => `<text x="${L - 4}" y="${Y(v) + 3}" text-anchor="end">${n1(v)}</text>`).join('');
+    return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Evolución del top set">
+      <line class="axis" x1="${L}" y1="${T}" x2="${L}" y2="${H - B}"/><line class="axis" x1="${L}" y1="${H - B}" x2="${W - R}" y2="${H - B}"/>
+      ${ticks}<path class="line" d="${path}"/>${dots}
+      <text x="${L}" y="${H - 6}">${fmtDate(points[0].date)}</text><text x="${W - R}" y="${H - 6}" text-anchor="end">${fmtDate(points[points.length - 1].date)}</text>
     </svg>`;
   }
 
