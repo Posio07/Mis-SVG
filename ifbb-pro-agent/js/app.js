@@ -644,6 +644,20 @@
     </svg>`;
   }
 
+  /* Fase 7: imagen ilustrativa (posición inicial/final) del ejercicio,
+   * solo si hay un equivalente mapeado en EXERCISE_IMAGES. Alterna entre
+   * ambas por CSS (sin JS); con prefers-reduced-motion queda fija en la
+   * primera. Puramente decorativa/informativa: no participa de ningún
+   * cálculo ni se guarda en ningún lado. */
+  function htmlExerciseImage(ex) {
+    const imgs = typeof EXERCISE_IMAGES !== 'undefined' ? EXERCISE_IMAGES[ex.name] : null;
+    if (!imgs) return '';
+    return `<div class="sm-image-wrap">
+      <img class="sm-image sm-image-a" src="${esc(imgs[0])}" alt="${esc(ex.name)} · posición inicial" loading="lazy" width="140" height="140">
+      <img class="sm-image sm-image-b" src="${esc(imgs[1])}" alt="${esc(ex.name)} · posición final" loading="lazy" width="140" height="140">
+    </div>`;
+  }
+
   function htmlPlateBarsForExercise(profile, ex, last) {
     if (!KNOWLEDGE.BARBELL_PATTERNS.has(ex.pattern)) return '';
     const hasTop = ex.sets.some(s => s.setType === 'top');
@@ -754,6 +768,7 @@
         <div class="session-mode-body">
           <h2 class="sm-exname">${esc(ex.name)}</h2>
           <div class="sm-exmeta">${esc(ex.muscleLabel)} ${sm.short ? `· ~${ex.durationMin} min` : ''}</div>
+          ${htmlExerciseImage(ex)}
           ${last ? `<div class="sm-last ${last.sets.some(s => s.setType === 'top') ? 'sm-last-top' : ''}">
             <b>Última vez</b> (${fmtDate(last.date)}): ${last.sets.map(s => `${s.setType === 'top' ? '🏆 ' : ''}<span class="v">${n1(s.weight)} ${profile.data.plateUnit || 'kg'} × ${s.reps}</span>`).join(' · ')}
           </div>` : `<div class="sm-last">Primera vez que registrás este ejercicio.</div>`}

@@ -204,6 +204,18 @@ li { margin-bottom: .25rem; }
 .timer-actions { display: flex; gap: .7rem; }
 .timer-actions .btn { min-height: 56px; min-width: 88px; }
 
+.sm-image-wrap { position: relative; width: 140px; height: 140px; margin: 0 auto .8rem; border-radius: var(--radius); overflow: hidden; background: var(--superficie-2); }
+.sm-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.sm-image-a { animation: sm-fade-a 4s ease-in-out infinite; }
+.sm-image-b { animation: sm-fade-b 4s ease-in-out infinite; opacity: 0; }
+@keyframes sm-fade-a { 0%, 40% { opacity: 1; } 50%, 90% { opacity: 0; } 100% { opacity: 1; } }
+@keyframes sm-fade-b { 0%, 40% { opacity: 0; } 50%, 90% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .sm-image-a, .sm-image-b { animation: none; }
+  .sm-image-a { opacity: 1; }
+  .sm-image-b { opacity: 0; }
+}
+
 .platebar-wrap { text-align: center; margin: .8rem 0; }
 .platebar-weight { font-family: var(--font-display); font-size: 1.4rem; margin-bottom: .3rem; }
 .platebar-note { font-size: .75rem; color: var(--acero); }
