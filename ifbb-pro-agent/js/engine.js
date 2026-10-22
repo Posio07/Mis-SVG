@@ -710,6 +710,14 @@
   // checkboxes que comparten `name`, reunidos acá en listas/objetos).
   function normalizeHealth(src) {
     src = src || {};
+    // normalizeProfile se llama tanto sobre datos frescos del formulario
+    // (campos planos: healthSymptoms, diabetesType, injuryZones...) como
+    // sobre un perfil YA normalizado y guardado (donde esos campos planos
+    // no existen más: solo existe `health`, ya anidado). `diabetesType`
+    // es un <select>, siempre viaja en el envío del formulario exista o
+    // no cada checkbox marcado, así que sirve para distinguir ambos casos
+    // sin depender de que algún checkbox en particular esté tildado.
+    if (!('diabetesType' in src) && src.health) return src.health;
     const toList = v => Array.isArray(v) ? v : (v ? [v] : []);
     const validZones = (K.INJURY_ZONES || []);
     const zones = unique(toList(src.injuryZones).filter(z => validZones.indexOf(z) !== -1));
