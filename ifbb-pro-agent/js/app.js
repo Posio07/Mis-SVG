@@ -202,7 +202,7 @@
           <select name="daysPerWeek">${[3, 4, 5, 6].map(n => `<option value="${n}" ${Number(d.daysPerWeek) === n ? 'selected' : ''}>${n} días</option>`).join('')}</select>
           <label>Grupos musculares rezagados (opcional)</label>
           <p class="help">Reciben un 25 % más de series que el resto, por encima incluso del recorte que les tocaría por tu división.</p>
-          <div class="row3">${Object.entries(KNOWLEDGE.MUSCLE_LABELS).map(([id, label]) => `<label style="display:flex;align-items:center;gap:.4rem;margin:.2rem 0;font-size:.85rem;color:var(--fg)"><input type="checkbox" name="laggingMuscles" value="${id}" style="width:auto" ${(d.laggingMuscles || []).includes(id) ? 'checked' : ''}> ${esc(label)}</label>`).join('')}</div>
+          <div class="row3">${Object.entries(KNOWLEDGE.MUSCLE_LABELS).map(([id, label]) => `<label style="display:flex;align-items:center;gap:.4rem;margin:.2rem 0;font-size:.85rem;color:var(--tiza)"><input type="checkbox" name="laggingMuscles" value="${id}" style="width:auto" ${(d.laggingMuscles || []).includes(id) ? 'checked' : ''}> ${esc(label)}</label>`).join('')}</div>
         </fieldset>
         <fieldset>
           <legend>Objetivo</legend>
@@ -290,6 +290,21 @@
     else body.innerHTML = htmlSupps(plan);
     const share = $('#btn-share');
     if (share) share.onclick = () => sharePlan(plan);
+    if (ui.planTab === 'training') wireTrainingDays(plan, p);
+  }
+
+  function wireTrainingDays(plan, profile) {
+    view.querySelectorAll('[data-toggle-day]').forEach(btn => {
+      btn.onclick = () => {
+        const bodyEl = document.getElementById('day-body-' + btn.dataset.toggleDay);
+        const isOpen = btn.getAttribute('aria-expanded') === 'true';
+        btn.setAttribute('aria-expanded', String(!isOpen));
+        if (bodyEl) bodyEl.hidden = isOpen;
+      };
+    });
+    view.querySelectorAll('[data-start-session]').forEach(btn => {
+      btn.onclick = () => startSessionMode(profile, plan, Number(btn.dataset.startSession), false);
+    });
   }
 
   function alerts(list) { return list.map(w => `<div class="alert ${w.level}">${esc(w.text)}</div>`).join(''); }
@@ -344,7 +359,7 @@
           <div class="stat"><div class="v">≥ ${n.waterL} L</div><div class="l">agua</div><div class="s">+ lo perdido por sudor</div></div>
         </div>
         <div class="macro-bar"><span class="p" style="width:${pct(n.protein * 4)}%"></span><span class="c" style="width:${pct(n.carbs * 4)}%"></span><span class="f" style="width:${pct(n.fat * 9)}%"></span></div>
-        <div class="legend"><span><i style="background:var(--accent-2)"></i>Proteína ${pct(n.protein * 4)} %</span><span><i style="background:var(--info)"></i>Carbohidrato ${pct(n.carbs * 4)} %</span><span><i style="background:var(--accent)"></i>Grasa ${pct(n.fat * 9)} %</span></div>
+        <div class="legend"><span><i style="background:var(--macro-proteina)"></i>Proteína ${pct(n.protein * 4)} %</span><span><i style="background:var(--macro-carbohidrato)"></i>Carbohidrato ${pct(n.carbs * 4)} %</span><span><i style="background:var(--macro-grasa)"></i>Grasa ${pct(n.fat * 9)} %</span></div>
         <div class="src">Fuentes: ${cite(n.sources)}</div>
       </div>
       <div class="card">
@@ -383,6 +398,8 @@
   function htmlTraining(plan) {
     const tr = plan.training, t = plan.targets;
     const setsRows = Object.entries(tr.weeklySets).map(([mu, s]) => `<tr><td>${esc(KNOWLEDGE.MUSCLE_LABELS[mu])}${tr.laggingApplied[mu] ? ' <span class="cite" title="Grupo rezagado: +25 % de series, anula el énfasis de la división">rezagado</span>' : ''}</td><td class="num">${s}</td></tr>`).join('');
+    // "Día actual": lunes = sesión 0, se repite cada semana según los días del split.
+    const todayIdx = ((new Date().getDay() + 6) % 7) % tr.daysPerWeek;
     return `
       <div class="card accent">
         <h2>Entrenamiento · ${esc(tr.splitName)}</h2>
@@ -395,9 +412,7 @@
         </ul>
         <div class="src">Fuentes: ${cite(tr.sources)}</div>
       </div>
-      ${tr.sessions.map(s => `<div class="session"><h4>${esc(s.name)} <small>${s.totalSets} series · ~${s.durationMin} min</small></h4>
-        ${s.exercises.map(e => e.topSet ? `<div class="ex"><div><div class="n">${esc(e.name)} <span class="cite" title="Serie pesada previa al back-off, Helms et al. 2015 / ACSM 2009">Top set</span></div><div class="m">${esc(e.muscleLabel)} · RIR ${e.topSet.rir} · descanso 3 min</div></div><div class="s">1 × ${e.topSet.reps}</div></div>${e.backoffSets > 0 ? `<div class="ex"><div><div class="n">${esc(e.name)} · back-off (−10 % carga)</div><div class="m">${esc(e.muscleLabel)} · RIR ${e.rir} · descanso ${e.rest}</div></div><div class="s">${e.backoffSets} × ${e.reps}</div></div>` : ''}` : `<div class="ex"><div><div class="n">${esc(e.name)}</div><div class="m">${esc(e.muscleLabel)} · RIR ${e.rir} · descanso ${e.rest}</div></div><div class="s">${e.sets} × ${e.reps}</div></div>`).join('')}
-      </div>`).join('')}
+      ${tr.sessions.map((s, i) => htmlSessionCard(s, i, i === todayIdx)).join('')}
       <div class="card">
         <h3>Cardio</h3>
         <p><b>${tr.cardio.sessions} sesiones × ${tr.cardio.minutes} min</b> · ${esc(tr.cardio.type)}</p>
@@ -417,6 +432,48 @@
           <li>Duerme 7-9 h: el sueño insuficiente reduce la retención de masa magra en déficit.</li>
         </ul>
       </div>`;
+  }
+
+  function htmlExRow(e, extraClass, label, reps, setsLabel, showTag) {
+    return `<div class="ex-row ${extraClass}">
+      <div class="ex-main">
+        <div class="ex-name">${esc(label != null ? label : e.name)}${showTag ? ' <span class="ex-tag">Top set</span>' : ''}</div>
+        <div class="ex-fields">
+          <span class="f">Grupo <b>${esc(e.muscleLabel)}</b></span>
+          <span class="f">RIR <b>${esc(showTag ? e.topSet.rir : e.rir)}</b></span>
+          <span class="f">Descanso <b>${esc(showTag ? '3 min' : e.rest)}</b></span>
+        </div>
+      </div>
+      <div class="ex-sets">${esc(setsLabel)} × ${esc(reps)}</div>
+    </div>`;
+  }
+
+  function htmlExercise(e) {
+    if (e.topSet) {
+      const topRow = htmlExRow(e, 'type-top', e.name, e.topSet.reps, '1', true);
+      const backoffRow = e.backoffSets > 0
+        ? `<div class="backoff">${htmlExRow(e, e.type === 'compound' ? 'type-compound' : 'type-isolation', 'Back-off (−10 % carga)', e.reps, e.backoffSets, false)}</div>`
+        : '';
+      return `<div class="ex-group">${topRow}${backoffRow}</div>`;
+    }
+    return `<div class="ex-group">${htmlExRow(e, e.type === 'compound' ? 'type-compound' : 'type-isolation', e.name, e.reps, e.sets, false)}</div>`;
+  }
+
+  function htmlSessionCard(s, i, isToday) {
+    const open = isToday;
+    return `<div class="session">
+      <button type="button" class="session-head" data-toggle-day="${i}" aria-expanded="${open}" aria-controls="day-body-${i}">
+        <div>
+          <h4>${esc(s.name)}${isToday ? ' <span class="cite">hoy</span>' : ''}</h4>
+          <div class="meta">${s.totalSets} series · ~${s.durationMin} min</div>
+        </div>
+        <span class="chev" aria-hidden="true">▾</span>
+      </button>
+      <div class="session-body" id="day-body-${i}" ${open ? '' : 'hidden'}>
+        ${s.exercises.map(htmlExercise).join('')}
+        <button class="btn btn-primary btn-block btn-lg" data-start-session="${i}" style="margin-top:.6rem">Empezar sesión</button>
+      </div>
+    </div>`;
   }
 
   function htmlTargets(plan) {
@@ -442,7 +499,7 @@
       ${cl ? `<div class="card">
         <h3>Classic Physique · límite de peso</h3>
         <p>Estatura ${n1(p.heightCm)} cm → límite <b>${cl.lb} lb (${n1(cl.kg)} kg)</b> <span class="muted">(${esc(cl.source)})</span>.</p>
-        <p>Peso objetivo ${n1(t.targetWeight)} kg: ${cl.status === 'ok' ? `<b style="color:var(--accent-2)">dentro del límite</b> con ${n1(cl.marginKg)} kg de margen.` : `<b style="color:var(--danger)">supera el límite</b> en ${n1(-cl.marginKg)} kg.`}</p>
+        <p>Peso objetivo ${n1(t.targetWeight)} kg: ${cl.status === 'ok' ? `<b style="color:var(--exito)">dentro del límite</b> con ${n1(cl.marginKg)} kg de margen.` : `<b style="color:var(--peligro)">supera el límite</b> en ${n1(-cl.marginKg)} kg.`}</p>
         <p class="help">La tabla de la app es la de agosto de 2023 y hubo cambios para 2025. Confirma el límite en el reglamento vigente de la IFBB Pro League e introdúcelo en Datos si difiere.</p>
       </div>` : ''}
       <div class="card">
@@ -451,7 +508,7 @@
         <ul>
           <li>Ritmo: ${t.ratePct} % del peso/semana (${n1(t.rateKg * 1000)} g/semana).</li>
           <li>Duración estimada: <b>${n0(t.weeksNeeded)} semanas</b> → ${fmtDate(t.estimatedDate)}.</li>
-          ${p.targetDate ? `<li>Fecha objetivo indicada: ${fmtDate(p.targetDate)} → ${t.dateFeasible === false ? '<b style="color:var(--danger)">no alcanzable con seguridad</b>' : '<b style="color:var(--accent-2)">alcanzable</b>'}.</li>` : ''}
+          ${p.targetDate ? `<li>Fecha objetivo indicada: ${fmtDate(p.targetDate)} → ${t.dateFeasible === false ? '<b style="color:var(--peligro)">no alcanzable con seguridad</b>' : '<b style="color:var(--exito)">alcanzable</b>'}.</li>` : ''}
           ${p.goal === 'cut' ? '<li>Reserva las últimas 1-2 semanas para ajustes finales (peak week) con supervisión: la evidencia sobre manipulación de agua y sodio es limitada y arriesgada.</li><li>Tras la competición, planifica 4-8 semanas de subida gradual de calorías ("reverse diet") para recuperar función hormonal.</li>' : '<li>Cuando alcances el techo de grasa off-season, pasa a una minidefinición de 4-8 semanas antes de seguir en volumen.</li>'}
         </ul>`}
       </div>
@@ -483,6 +540,11 @@
       `Entreno: ${plan.training.splitName}, ${plan.training.daysPerWeek} días/semana`;
     if (navigator.share) navigator.share({ title: 'Plan IFBB Pro Agent', text }).catch(() => {});
     else if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => toast('Resumen copiado'));
+  }
+
+  /* ---------- Modo sesión (Fase 4, placeholder hasta esa fase) ---------- */
+  function startSessionMode(profile, plan, dayIndex, short) {
+    toast('Modo sesión: próximamente');
   }
 
   /* ---------- Progreso ---------- */
