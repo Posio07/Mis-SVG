@@ -537,9 +537,12 @@
     // DEC-002 / DEC-008: en definición, el primer ejercicio ELEGIBLE del día
     // lleva un top set pesado (no suma series nuevas: la primera de sus
     // series pasa a ser el top set y el resto queda como back-off al -10%
-    // de carga). Elegible = multiarticular bilateral con carga libre o
-    // guiada pesada (ACSM 2009, ≥80% 1RM); nunca unilaterales ni máquinas
-    // de press. Si el primero del día no es elegible, el elegible se busca
+    // de carga). Formato top set/back-off: [Criterio], construido sobre
+    // [Evidencia] Helms et al. 2015, Bickel, Cross & Bamman 2011, Spiering
+    // et al. 2021 y [Posicionamiento] ACSM 2009. Elegible = multiarticular
+    // bilateral con carga libre o guiada pesada (ACSM 2009, ≥80% 1RM);
+    // nunca unilaterales ni máquinas de press. Si el primero del día no es
+    // elegible, el elegible se busca
     // más adelante y pasa a ordenarse primero. Si ninguno es elegible, ese
     // día no lleva top set.
     if (p.goal === 'cut') {
@@ -596,7 +599,7 @@
       deload: 'Cada 4-6 semanas, o cuando el rendimiento caiga 2 sesiones seguidas, reduce el volumen a la mitad durante una semana manteniendo la carga.',
       cardio,
       posing: p.division.startsWith('general') ? null : 'Practica las poses obligatorias de tu división 2-3 veces/semana durante 10-15 min; en las últimas 8 semanas a diario. Es parte del juicio y también gasto energético.',
-      sources: ['HELMS_TRAIN', 'SCHOENFELD_VOL', 'SCHOENFELD_FREQ', 'ACSM_RT', 'ACSM_CARDIO', 'WHO_PA'],
+      sources: ['HELMS_TRAIN', 'SCHOENFELD_VOL', 'SCHOENFELD_FREQ', 'ACSM_RT', 'ACSM_CARDIO', 'WHO_PA', 'BICKEL_2011', 'SPIERING_2021'],
       warnings: trainingWarnings,
     };
   }
@@ -637,6 +640,14 @@
       division, goal: ['cut', 'bulk', 'maintain'].includes(src.goal) ? src.goal : 'cut',
       targetDate: src.targetDate || '', targetBf: n(src.targetBf), classicLimitLb: n(src.classicLimitLb),
       laggingMuscles, healthGoal: !!src.healthGoal,
+      // Fase 5: ajustes de la barra cargada. No participan de ningún cálculo
+      // de volumen/calorías/selección de ejercicios, solo de la vista de
+      // discos del modo sesión.
+      plateUnit: src.plateUnit === 'lb' ? 'lb' : 'kg',
+      barWeight: (() => { const w = parseFloat(src.barWeight); return w > 0 ? w : (src.plateUnit === 'lb' ? 45 : 20); })(),
+      availablePlates: Array.isArray(src.availablePlates) && src.availablePlates.length
+        ? src.availablePlates.map(Number).filter(n => n > 0)
+        : (src.plateUnit === 'lb' ? [55, 45, 35, 25, 10, 5, 2.5] : [25, 20, 15, 10, 5, 2.5, 1.25]),
     };
   }
 

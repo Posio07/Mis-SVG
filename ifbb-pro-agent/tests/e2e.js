@@ -57,8 +57,48 @@ const server = http.createServer((req, res) => {
     if (!txt.includes(marker)) throw new Error(`tab ${tab} missing "${marker}"`);
     await shot(`04-${tab}`);
   }
-  const training = await page.$$eval('.session', els => els.length);
-  if (training !== 5) throw new Error(`expected 5 sessions, got ${training}`);
+  await page.click('[data-pt=training]');
+  const training = await page.$$eval('[data-toggle-day]', els => els.length);
+  if (training !== 5) throw new Error(`expected 5 training days, got ${training}`);
+
+  // Modo sesión (Fase 4): abrir el día de hoy, registrar una serie, saltar
+  // el descanso, terminar temprano y verificar el resumen + el guardado.
+  await page.waitForSelector('.session-body:not([hidden]) [data-start-session]');
+  await page.click('.session-body:not([hidden]) [data-start-session]');
+  await page.waitForSelector('.session-mode');
+  await shot('06-session-mode');
+  await page.fill('[data-sm-weight="0"]', '60');
+  await page.fill('[data-sm-reps="0"]', '5');
+  await page.click('[data-sm-done="0"]');
+  await page.waitForSelector('.timer-overlay');
+  await shot('07-session-timer');
+  await page.click('#sm-timer-skip');
+  await page.waitForSelector('#sm-timer', { state: 'detached' });
+  await page.click('#sm-finish');
+  await page.waitForSelector('#sm-back-to-plan');
+  const summaryTxt = await page.textContent('.session-mode-body');
+  if (!/series hechas/.test(summaryTxt)) throw new Error('session summary missing series count');
+  await shot('08-session-summary');
+  const workouts = await page.evaluate(() => JSON.parse(localStorage.getItem('ifbb-agent:v1')).profiles[0].workouts);
+  if (!workouts || workouts.length < 1 || workouts[0].reps !== 5 || workouts[0].weight !== 60) throw new Error('workout set not saved correctly: ' + JSON.stringify(workouts));
+  await page.click('#sm-back-to-plan');
+  await page.waitForSelector('#session-mode-root', { state: 'detached' });
+  await page.waitForSelector('.subtabs');
+
+  // Fase 5: segunda sesión del mismo ejercicio ya con un "última vez" real
+  // -> la barra cargada debe dibujar discos en vez del aviso "sin historial".
+  await page.click('.session-body:not([hidden]) [data-start-session]');
+  await page.waitForSelector('.session-mode');
+  // Solo logueamos el top set en la sesión anterior, así que el back-off
+  // puede seguir sin historial propio: lo que importa es que el top set
+  // (el que sí tiene "última vez") ya dibuje discos reales.
+  const platebarHtml = await page.innerHTML('.session-mode-body');
+  if (!/platebar-weight/.test(platebarHtml)) throw new Error('la barra cargada no dibujó discos con una "última vez" ya registrada');
+  if (!/<svg class="platebar"/.test(platebarHtml)) throw new Error('no se encontró el SVG de la barra cargada');
+  await shot('09-platebar');
+  page.once('dialog', d => d.accept());
+  await page.click('#sm-close');
+  await page.waitForSelector('#session-mode-root', { state: 'detached' });
 
   // Progreso
   await page.click('.tab[data-tab=progress]');
@@ -71,6 +111,8 @@ const server = http.createServer((req, res) => {
   if (rows < 3) throw new Error('log rows missing');
   await shot('05-progress');
   await page.click('#btn-apply');
+  await page.waitForSelector('.modal-overlay');
+  await page.click('#modal-confirm');
   await page.waitForSelector('#plan-body .stat');
   const w = await page.evaluate(() => JSON.parse(localStorage.getItem('ifbb-agent:v1')).profiles[0].data.weightKg);
   if (w !== 83.2) throw new Error('apply last measurement failed: ' + w);

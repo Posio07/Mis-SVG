@@ -30,6 +30,7 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const n1 = v => (Math.round(v * 10) / 10).toLocaleString('es');
   const n0 = v => Math.round(v).toLocaleString('es');
+  const n2 = v => (Math.round(v * 100) / 100).toLocaleString('es', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtDate = iso => { const d = new Date(iso + 'T00:00:00'); return isNaN(d) ? iso : d.toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric' }); };
   const cite = ids => (Array.isArray(ids) ? ids : [ids]).map(id => `<span class="cite" title="${esc(KNOWLEDGE.SOURCES[id] ? KNOWLEDGE.SOURCES[id].short : id)}">${esc(id)}</span>`).join('');
 
@@ -37,6 +38,27 @@
   function toast(msg) {
     const t = $('#toast'); t.textContent = msg; t.classList.add('show');
     clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+  }
+
+  /* Modal de confirmación con botones a medida (en vez de confirm() nativo,
+   * para poder rotular "Recalcular"/"Cancelar" como pide la Fase 6). */
+  function confirmModal(message, { confirmLabel = 'Continuar', cancelLabel = 'Cancelar' } = {}) {
+    return new Promise(resolve => {
+      const root = document.createElement('div');
+      root.className = 'modal-overlay';
+      root.innerHTML = `<div class="modal-card">
+        <p>${esc(message)}</p>
+        <div class="btn-row">
+          <button class="btn" id="modal-cancel">${esc(cancelLabel)}</button>
+          <button class="btn btn-primary" id="modal-confirm">${esc(confirmLabel)}</button>
+        </div>
+      </div>`;
+      document.body.appendChild(root);
+      const close = ok => { root.remove(); resolve(ok); };
+      root.querySelector('#modal-cancel').onclick = () => close(false);
+      root.querySelector('#modal-confirm').onclick = () => close(true);
+      root.addEventListener('click', e => { if (e.target === root) close(false); });
+    });
   }
 
   /* ---------- Navegación ---------- */
@@ -154,6 +176,12 @@
     reader.readAsText(file);
   }
 
+  function platesCheckboxes(unit, selected) {
+    const canon = unit === 'lb' ? KNOWLEDGE.PLATES_LB : KNOWLEDGE.PLATES_KG;
+    const sel = Array.isArray(selected) && selected.length ? selected.map(Number) : canon;
+    return canon.map(p => `<label style="display:flex;align-items:center;gap:.4rem;margin:.2rem 0;font-size:.85rem;color:var(--tiza)"><input type="checkbox" name="availablePlates" value="${p}" style="width:auto" ${sel.includes(p) ? 'checked' : ''}> ${n1(p)} ${unit}</label>`).join('');
+  }
+
   /* ---------- Datos ---------- */
   function renderData() {
     const editing = ui.editingId ? state.profiles.find(p => p.id === ui.editingId) : null;
@@ -202,7 +230,7 @@
           <select name="daysPerWeek">${[3, 4, 5, 6].map(n => `<option value="${n}" ${Number(d.daysPerWeek) === n ? 'selected' : ''}>${n} días</option>`).join('')}</select>
           <label>Grupos musculares rezagados (opcional)</label>
           <p class="help">Reciben un 25 % más de series que el resto, por encima incluso del recorte que les tocaría por tu división.</p>
-          <div class="row3">${Object.entries(KNOWLEDGE.MUSCLE_LABELS).map(([id, label]) => `<label style="display:flex;align-items:center;gap:.4rem;margin:.2rem 0;font-size:.85rem;color:var(--fg)"><input type="checkbox" name="laggingMuscles" value="${id}" style="width:auto" ${(d.laggingMuscles || []).includes(id) ? 'checked' : ''}> ${esc(label)}</label>`).join('')}</div>
+          <div class="row3">${Object.entries(KNOWLEDGE.MUSCLE_LABELS).map(([id, label]) => `<label style="display:flex;align-items:center;gap:.4rem;margin:.2rem 0;font-size:.85rem;color:var(--tiza)"><input type="checkbox" name="laggingMuscles" value="${id}" style="width:auto" ${(d.laggingMuscles || []).includes(id) ? 'checked' : ''}> ${esc(label)}</label>`).join('')}</div>
         </fieldset>
         <fieldset>
           <legend>Objetivo</legend>
@@ -227,6 +255,16 @@
           <label style="display:flex;align-items:center;gap:.5rem;margin-top:1rem"><input type="checkbox" name="healthGoal" style="width:auto" ${d.healthGoal ? 'checked' : ''}> Priorizar salud/funcional sobre estética</label>
           <p class="help">En definición, mantiene el cardio en 150 min/semana en vez de recortarlo, y suma sentadilla búlgara, step-up con carga y paseo del granjero a la rutina de pierna.</p>
         </fieldset>
+        <fieldset>
+          <legend>Barra cargada</legend>
+          <p class="help">Para que el modo sesión te muestre qué discos poner en cada lado, en los ejercicios de barra (sentadilla, press banca, press militar, peso muerto rumano, remo con barra, hip thrust).</p>
+          <div class="row2">
+            <div><label>Unidad</label><select name="plateUnit" id="plateUnit"><option value="kg" ${(d.plateUnit || 'kg') === 'kg' ? 'selected' : ''}>Kilogramos</option><option value="lb" ${d.plateUnit === 'lb' ? 'selected' : ''}>Libras</option></select></div>
+            <div><label>Peso de la barra</label><input name="barWeight" id="barWeight" type="number" inputmode="decimal" step="0.5" value="${esc(d.barWeight || '')}" placeholder="${(d.plateUnit || 'kg') === 'lb' ? '45' : '20'}"></div>
+          </div>
+          <label>Discos disponibles</label>
+          <div class="row3" id="plates-wrap">${platesCheckboxes(d.plateUnit || 'kg', d.availablePlates)}</div>
+        </fieldset>
         <div id="form-errors"></div>
         <div class="btn-row">
           <button type="submit" class="btn btn-primary btn-block">Guardar y generar plan</button>
@@ -249,12 +287,18 @@
     }
     sexSel.onchange = refreshDivisions; divSel.onchange = refreshHelp; refreshHelp();
     $('#btn-cancel').onclick = () => go(active() ? 'plan' : 'profiles');
+    $('#plateUnit').onchange = () => {
+      const u = $('#plateUnit').value;
+      $('#barWeight').placeholder = u === 'lb' ? '45' : '20';
+      $('#plates-wrap').innerHTML = platesCheckboxes(u, null);
+    };
 
     form.onsubmit = e => {
       e.preventDefault();
       const fd = new FormData(form);
       const data = Object.fromEntries(fd.entries());
       data.laggingMuscles = fd.getAll('laggingMuscles');
+      data.availablePlates = fd.getAll('availablePlates');
       const errors = ENGINE.validateProfile(data);
       if (errors.length) { $('#form-errors').innerHTML = errors.map(x => `<div class="alert danger">${esc(x)}</div>`).join(''); window.scrollTo({ top: document.body.scrollHeight }); return; }
       const norm = ENGINE.normalizeProfile(data);
@@ -290,6 +334,24 @@
     else body.innerHTML = htmlSupps(plan);
     const share = $('#btn-share');
     if (share) share.onclick = () => sharePlan(plan);
+    if (ui.planTab === 'training') wireTrainingDays(plan, p);
+  }
+
+  function wireTrainingDays(plan, profile) {
+    view.querySelectorAll('[data-toggle-day]').forEach(btn => {
+      btn.onclick = () => {
+        const bodyEl = document.getElementById('day-body-' + btn.dataset.toggleDay);
+        const isOpen = btn.getAttribute('aria-expanded') === 'true';
+        btn.setAttribute('aria-expanded', String(!isOpen));
+        if (bodyEl) bodyEl.hidden = isOpen;
+      };
+    });
+    view.querySelectorAll('[data-start-session]').forEach(btn => {
+      btn.onclick = () => startSessionMode(profile, plan, Number(btn.dataset.startSession), false);
+    });
+    view.querySelectorAll('[data-start-session-short]').forEach(btn => {
+      btn.onclick = () => startSessionMode(profile, plan, Number(btn.dataset.startSessionShort), true);
+    });
   }
 
   function alerts(list) { return list.map(w => `<div class="alert ${w.level}">${esc(w.text)}</div>`).join(''); }
@@ -344,7 +406,7 @@
           <div class="stat"><div class="v">≥ ${n.waterL} L</div><div class="l">agua</div><div class="s">+ lo perdido por sudor</div></div>
         </div>
         <div class="macro-bar"><span class="p" style="width:${pct(n.protein * 4)}%"></span><span class="c" style="width:${pct(n.carbs * 4)}%"></span><span class="f" style="width:${pct(n.fat * 9)}%"></span></div>
-        <div class="legend"><span><i style="background:var(--accent-2)"></i>Proteína ${pct(n.protein * 4)} %</span><span><i style="background:var(--info)"></i>Carbohidrato ${pct(n.carbs * 4)} %</span><span><i style="background:var(--accent)"></i>Grasa ${pct(n.fat * 9)} %</span></div>
+        <div class="legend"><span><i style="background:var(--macro-proteina)"></i>Proteína ${pct(n.protein * 4)} %</span><span><i style="background:var(--macro-carbohidrato)"></i>Carbohidrato ${pct(n.carbs * 4)} %</span><span><i style="background:var(--macro-grasa)"></i>Grasa ${pct(n.fat * 9)} %</span></div>
         <div class="src">Fuentes: ${cite(n.sources)}</div>
       </div>
       <div class="card">
@@ -383,6 +445,8 @@
   function htmlTraining(plan) {
     const tr = plan.training, t = plan.targets;
     const setsRows = Object.entries(tr.weeklySets).map(([mu, s]) => `<tr><td>${esc(KNOWLEDGE.MUSCLE_LABELS[mu])}${tr.laggingApplied[mu] ? ' <span class="cite" title="Grupo rezagado: +25 % de series, anula el énfasis de la división">rezagado</span>' : ''}</td><td class="num">${s}</td></tr>`).join('');
+    // "Día actual": lunes = sesión 0, se repite cada semana según los días del split.
+    const todayIdx = ((new Date().getDay() + 6) % 7) % tr.daysPerWeek;
     return `
       <div class="card accent">
         <h2>Entrenamiento · ${esc(tr.splitName)}</h2>
@@ -395,9 +459,7 @@
         </ul>
         <div class="src">Fuentes: ${cite(tr.sources)}</div>
       </div>
-      ${tr.sessions.map(s => `<div class="session"><h4>${esc(s.name)} <small>${s.totalSets} series · ~${s.durationMin} min</small></h4>
-        ${s.exercises.map(e => e.topSet ? `<div class="ex"><div><div class="n">${esc(e.name)} <span class="cite" title="Serie pesada previa al back-off, Helms et al. 2015 / ACSM 2009">Top set</span></div><div class="m">${esc(e.muscleLabel)} · RIR ${e.topSet.rir} · descanso 3 min</div></div><div class="s">1 × ${e.topSet.reps}</div></div>${e.backoffSets > 0 ? `<div class="ex"><div><div class="n">${esc(e.name)} · back-off (−10 % carga)</div><div class="m">${esc(e.muscleLabel)} · RIR ${e.rir} · descanso ${e.rest}</div></div><div class="s">${e.backoffSets} × ${e.reps}</div></div>` : ''}` : `<div class="ex"><div><div class="n">${esc(e.name)}</div><div class="m">${esc(e.muscleLabel)} · RIR ${e.rir} · descanso ${e.rest}</div></div><div class="s">${e.sets} × ${e.reps}</div></div>`).join('')}
-      </div>`).join('')}
+      ${tr.sessions.map((s, i) => htmlSessionCard(s, i, i === todayIdx)).join('')}
       <div class="card">
         <h3>Cardio</h3>
         <p><b>${tr.cardio.sessions} sesiones × ${tr.cardio.minutes} min</b> · ${esc(tr.cardio.type)}</p>
@@ -417,6 +479,51 @@
           <li>Duerme 7-9 h: el sueño insuficiente reduce la retención de masa magra en déficit.</li>
         </ul>
       </div>`;
+  }
+
+  function htmlExRow(e, extraClass, label, reps, setsLabel, showTag) {
+    return `<div class="ex-row ${extraClass}">
+      <div class="ex-main">
+        <div class="ex-name">${esc(label != null ? label : e.name)}${showTag ? ' <span class="ex-tag">Top set</span>' : ''}</div>
+        <div class="ex-fields">
+          <span class="f">Grupo <b>${esc(e.muscleLabel)}</b></span>
+          <span class="f">RIR <b>${esc(showTag ? e.topSet.rir : e.rir)}</b></span>
+          <span class="f">Descanso <b>${esc(showTag ? '3 min' : e.rest)}</b></span>
+        </div>
+      </div>
+      <div class="ex-sets">${esc(setsLabel)} × ${esc(reps)}</div>
+    </div>`;
+  }
+
+  function htmlExercise(e) {
+    if (e.topSet) {
+      const topRow = htmlExRow(e, 'type-top', e.name, e.topSet.reps, '1', true);
+      const backoffRow = e.backoffSets > 0
+        ? `<div class="backoff">${htmlExRow(e, e.type === 'compound' ? 'type-compound' : 'type-isolation', 'Back-off (−10 % carga)', e.reps, e.backoffSets, false)}</div>`
+        : '';
+      return `<div class="ex-group">${topRow}${backoffRow}</div>`;
+    }
+    return `<div class="ex-group">${htmlExRow(e, e.type === 'compound' ? 'type-compound' : 'type-isolation', e.name, e.reps, e.sets, false)}</div>`;
+  }
+
+  function htmlSessionCard(s, i, isToday) {
+    const open = isToday;
+    return `<div class="session">
+      <button type="button" class="session-head" data-toggle-day="${i}" aria-expanded="${open}" aria-controls="day-body-${i}">
+        <div>
+          <h4>${esc(s.name)}${isToday ? ' <span class="cite">hoy</span>' : ''}</h4>
+          <div class="meta">${s.totalSets} series · ~${s.durationMin} min</div>
+        </div>
+        <span class="chev" aria-hidden="true">▾</span>
+      </button>
+      <div class="session-body" id="day-body-${i}" ${open ? '' : 'hidden'}>
+        ${s.exercises.map(htmlExercise).join('')}
+        <div class="btn-row" style="margin-top:.6rem">
+          <button class="btn btn-primary btn-lg" data-start-session="${i}" style="flex:2">Empezar sesión</button>
+          <button class="btn" data-start-session-short="${i}" style="flex:1">Versión corta</button>
+        </div>
+      </div>
+    </div>`;
   }
 
   function htmlTargets(plan) {
@@ -442,7 +549,7 @@
       ${cl ? `<div class="card">
         <h3>Classic Physique · límite de peso</h3>
         <p>Estatura ${n1(p.heightCm)} cm → límite <b>${cl.lb} lb (${n1(cl.kg)} kg)</b> <span class="muted">(${esc(cl.source)})</span>.</p>
-        <p>Peso objetivo ${n1(t.targetWeight)} kg: ${cl.status === 'ok' ? `<b style="color:var(--accent-2)">dentro del límite</b> con ${n1(cl.marginKg)} kg de margen.` : `<b style="color:var(--danger)">supera el límite</b> en ${n1(-cl.marginKg)} kg.`}</p>
+        <p>Peso objetivo ${n1(t.targetWeight)} kg: ${cl.status === 'ok' ? `<b style="color:var(--exito)">dentro del límite</b> con ${n1(cl.marginKg)} kg de margen.` : `<b style="color:var(--peligro)">supera el límite</b> en ${n1(-cl.marginKg)} kg.`}</p>
         <p class="help">La tabla de la app es la de agosto de 2023 y hubo cambios para 2025. Confirma el límite en el reglamento vigente de la IFBB Pro League e introdúcelo en Datos si difiere.</p>
       </div>` : ''}
       <div class="card">
@@ -451,7 +558,7 @@
         <ul>
           <li>Ritmo: ${t.ratePct} % del peso/semana (${n1(t.rateKg * 1000)} g/semana).</li>
           <li>Duración estimada: <b>${n0(t.weeksNeeded)} semanas</b> → ${fmtDate(t.estimatedDate)}.</li>
-          ${p.targetDate ? `<li>Fecha objetivo indicada: ${fmtDate(p.targetDate)} → ${t.dateFeasible === false ? '<b style="color:var(--danger)">no alcanzable con seguridad</b>' : '<b style="color:var(--accent-2)">alcanzable</b>'}.</li>` : ''}
+          ${p.targetDate ? `<li>Fecha objetivo indicada: ${fmtDate(p.targetDate)} → ${t.dateFeasible === false ? '<b style="color:var(--peligro)">no alcanzable con seguridad</b>' : '<b style="color:var(--exito)">alcanzable</b>'}.</li>` : ''}
           ${p.goal === 'cut' ? '<li>Reserva las últimas 1-2 semanas para ajustes finales (peak week) con supervisión: la evidencia sobre manipulación de agua y sodio es limitada y arriesgada.</li><li>Tras la competición, planifica 4-8 semanas de subida gradual de calorías ("reverse diet") para recuperar función hormonal.</li>' : '<li>Cuando alcances el techo de grasa off-season, pasa a una minidefinición de 4-8 semanas antes de seguir en volumen.</li>'}
         </ul>`}
       </div>
@@ -485,19 +592,306 @@
     else if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => toast('Resumen copiado'));
   }
 
+  /* ---------- Modo sesión (Fase 4) ----------
+   * Pantalla a pantalla completa para usar en el gimnasio. No toca
+   * plan.training en ningún momento ("Versión corta" es solo una forma
+   * distinta de mostrarlo). Cada serie registrada se guarda al toque en
+   * profile.workouts (mismo localStorage que usa Progreso). */
+  let sm = null; // estado del modo sesión activo (o null si no hay ninguno)
+  let smWakeLock = null;
+  let smTimerInterval = null;
+  let smTimerState = null;
+
+  function parseRestSeconds(label) {
+    const m = String(label || '').match(/(\d+)/);
+    const n = m ? parseInt(m[1], 10) : 90;
+    return /min/.test(label || '') ? n * 60 : n;
+  }
+  function fmtTimer(s) { const m = Math.floor(s / 60), r = s % 60; return `${m}:${String(r).padStart(2, '0')}`; }
+
+  /* ---------- Barra cargada (Fase 5) ----------
+   * Reparto de discos por lado: greedy de mayor a menor denominación entre
+   * los discos disponibles del perfil. Si no da exacto, se queda en el
+   * valor más cercano POR DEBAJO y se muestra la diferencia. */
+  function platesForWeight(totalWeight, barWeight, availablePlates) {
+    const perSide = (totalWeight - barWeight) / 2;
+    if (!(perSide > 0)) return { plates: [], achieved: barWeight, diff: round2(totalWeight - barWeight) };
+    const sorted = availablePlates.slice().sort((a, b) => b - a);
+    const used = []; let remaining = perSide;
+    sorted.forEach(p => { while (remaining >= p - 1e-6) { used.push(p); remaining -= p; } });
+    const achieved = barWeight + used.reduce((a, b) => a + b, 0) * 2;
+    return { plates: used, achieved: round2(achieved), diff: round2(totalWeight - achieved) };
+  }
+  function round2(v) { return Math.round(v * 100) / 100; }
+
+  function svgBarbell(result, unit) {
+    const canon = unit === 'lb' ? KNOWLEDGE.PLATES_LB : KNOWLEDGE.PLATES_KG;
+    const colorFor = w => { const idx = canon.findIndex(p => Math.abs(p - w) < 1e-6); return KNOWLEDGE.PLATE_COLORS[idx === -1 ? canon.length - 1 : idx]; };
+    const heightFor = w => Math.min(64, 24 + w * (unit === 'lb' ? 0.55 : 1.2));
+    const widthFor = w => (unit === 'lb' ? w >= 35 : w >= 10) ? 11 : 7;
+    let x = 96; // arranca pegado al manguito, hacia afuera
+    const rects = result.plates.map(w => {
+      const h = heightFor(w), wd = widthFor(w);
+      const svg = `<rect x="${x}" y="${(100 - h) / 2}" width="${wd}" height="${h}" rx="2" fill="${colorFor(w)}" stroke="#1a1d20" stroke-width="1"></rect><rect x="${292 - x - wd}" y="${(100 - h) / 2}" width="${wd}" height="${h}" rx="2" fill="${colorFor(w)}" stroke="#1a1d20" stroke-width="1"></rect>`;
+      x += wd + 1.5;
+      return svg;
+    }).join('');
+    return `<svg class="platebar" viewBox="0 0 292 100" width="100%" height="64" role="img" aria-label="Carga de la barra">
+      <rect x="0" y="46" width="292" height="8" rx="2" fill="var(--acero)"></rect>
+      <rect x="86" y="30" width="10" height="40" rx="2" fill="var(--superficie-2)" stroke="var(--borde)"></rect>
+      <rect x="196" y="30" width="10" height="40" rx="2" fill="var(--superficie-2)" stroke="var(--borde)"></rect>
+      ${rects}
+    </svg>`;
+  }
+
+  /* Fase 7: imagen ilustrativa (posición inicial/final) del ejercicio,
+   * solo si hay un equivalente mapeado en EXERCISE_IMAGES. Alterna entre
+   * ambas por CSS (sin JS); con prefers-reduced-motion queda fija en la
+   * primera. Puramente decorativa/informativa: no participa de ningún
+   * cálculo ni se guarda en ningún lado. */
+  function htmlExerciseImage(ex) {
+    const imgs = typeof EXERCISE_IMAGES !== 'undefined' ? EXERCISE_IMAGES[ex.name] : null;
+    if (!imgs) return '';
+    return `<div class="sm-image-wrap">
+      <img class="sm-image sm-image-a" src="${esc(imgs[0])}" alt="${esc(ex.name)} · posición inicial" loading="lazy" width="140" height="140">
+      <img class="sm-image sm-image-b" src="${esc(imgs[1])}" alt="${esc(ex.name)} · posición final" loading="lazy" width="140" height="140">
+    </div>`;
+  }
+
+  function htmlPlateBarsForExercise(profile, ex, last) {
+    if (!KNOWLEDGE.BARBELL_PATTERNS.has(ex.pattern)) return '';
+    const hasTop = ex.sets.some(s => s.setType === 'top');
+    const findLast = (type, num) => last && last.sets.find(s => s.setType === type && s.setNumber === num);
+    if (hasTop) {
+      const topW = findLast('top', 1); const boW = findLast('backoff', 1);
+      return `<div class="card" style="margin-bottom:.8rem"><h3 style="font-size:.85rem;margin-bottom:.3rem">Carga · Top set</h3>${htmlPlateBar(profile, ex.pattern, topW && topW.weight)}</div>` +
+        (ex.sets.some(s => s.setType === 'backoff') ? `<div class="card" style="margin-bottom:.8rem"><h3 style="font-size:.85rem;margin-bottom:.3rem">Carga · Back-off</h3>${htmlPlateBar(profile, ex.pattern, boW && boW.weight)}</div>` : '');
+    }
+    const firstW = findLast('normal', 1);
+    return `<div class="card" style="margin-bottom:.8rem"><h3 style="font-size:.85rem;margin-bottom:.3rem">Carga sugerida</h3>${htmlPlateBar(profile, ex.pattern, firstW && firstW.weight)}</div>`;
+  }
+
+  function htmlPlateBar(profile, pattern, weight) {
+    if (!KNOWLEDGE.BARBELL_PATTERNS.has(pattern)) return '';
+    if (!weight || weight <= 0) return `<div class="platebar-wrap"><p class="platebar-note">Registrá tu primera sesión para ver la carga.</p></div>`;
+    const unit = profile.data.plateUnit || 'kg';
+    const bar = profile.data.barWeight || (unit === 'lb' ? 45 : 20);
+    const plates = profile.data.availablePlates && profile.data.availablePlates.length ? profile.data.availablePlates : (unit === 'lb' ? KNOWLEDGE.PLATES_LB : KNOWLEDGE.PLATES_KG);
+    const res = platesForWeight(weight, bar, plates);
+    const exact = Math.abs(res.diff) < 0.01;
+    return `<div class="platebar-wrap">
+      ${svgBarbell(res, unit)}
+      <div class="platebar-weight">${n1(exact ? weight : res.achieved)} ${unit}${!exact ? ` <span class="muted" style="font-size:.8rem">(objetivo ${n1(weight)} ${unit}, −${n1(Math.abs(res.diff))} ${unit})</span>` : ''}</div>
+      <div class="platebar-note">barra ${n1(bar)} ${unit} + ${res.plates.length ? res.plates.map(p => n1(p)).join(' + ') + ' por lado' : 'sin discos'}</div>
+    </div>`;
+  }
+
+  // Misma fórmula que usa engine.js para la duración estimada (DEC-003 v2 /
+  // DEC-007), aplicada acá solo para mostrar el total de la versión corta;
+  // no cambia ningún cálculo del plan.
+  function exerciseDurationMin(e) {
+    const uf = e.unilateral ? 2 : 1;
+    let seconds = 0;
+    if (e.topSet) { seconds += uf * (180 + 45); seconds += uf * ((e.backoffSets || 0) * (150 + 45)); }
+    else { const rest = e.type === 'compound' ? 150 : 75; seconds += uf * (e.sets * (rest + 45)); }
+    return Math.round(seconds / 60);
+  }
+
+  function buildSmExercises(session, short) {
+    let list = session.exercises;
+    if (short) list = list.filter(e => e.type === 'compound').slice(0, 2);
+    return list.map(e => {
+      const sets = [];
+      if (e.topSet) {
+        sets.push({ setType: 'top', setNumber: 1, repsLabel: e.topSet.reps, restLabel: '3 min' });
+        for (let i = 0; i < (e.backoffSets || 0); i++) sets.push({ setType: 'backoff', setNumber: i + 1, repsLabel: e.reps, restLabel: e.rest });
+      } else {
+        for (let i = 0; i < e.sets; i++) sets.push({ setType: 'normal', setNumber: i + 1, repsLabel: e.reps, restLabel: e.rest });
+      }
+      return { name: e.name, muscle: e.muscle, muscleLabel: e.muscleLabel, type: e.type, pattern: e.pattern, unilateral: e.unilateral, durationMin: exerciseDurationMin(e), sets };
+    });
+  }
+
+  async function requestWakeLock() {
+    try { if ('wakeLock' in navigator) smWakeLock = await navigator.wakeLock.request('screen'); } catch (e) { /* no disponible o denegado: seguimos igual */ }
+  }
+  function releaseWakeLock() { try { if (smWakeLock) { smWakeLock.release(); smWakeLock = null; } } catch (e) { /* noop */ } }
+
+  function startSessionMode(profile, plan, dayIndex, short) {
+    const session = plan.training.sessions[dayIndex];
+    const exercises = buildSmExercises(session, short);
+    if (!exercises.length) { toast('Este día no tiene multiarticulares para la versión corta.'); return; }
+    sm = {
+      profileId: profile.id, sessionId: uid(), dayIndex, dayName: session.name, short,
+      exercises, exIndex: 0, startedAt: Date.now(), finished: false,
+      values: exercises.map(e => e.sets.map(() => ({ weight: '', reps: '', done: false }))),
+    };
+    requestWakeLock();
+    let root = document.getElementById('session-mode-root');
+    if (!root) { root = document.createElement('div'); root.id = 'session-mode-root'; document.body.appendChild(root); }
+    renderSessionMode(profile);
+  }
+
+  function endSessionMode() {
+    closeTimer();
+    releaseWakeLock();
+    const root = document.getElementById('session-mode-root');
+    if (root) root.remove();
+    sm = null;
+  }
+
+  function lastTimeFor(profile, exerciseName) {
+    const all = (profile.workouts || []).filter(w => w.exercise === exerciseName && w.sessionId !== sm.sessionId);
+    if (!all.length) return null;
+    let lastEntry = all[0];
+    all.forEach(w => { if (w.savedAt > lastEntry.savedAt) lastEntry = w; });
+    const sets = all.filter(w => w.sessionId === lastEntry.sessionId).sort((a, b) => (a.setType === 'top' ? -1 : b.setType === 'top' ? 1 : 0) || a.setNumber - b.setNumber);
+    return { date: lastEntry.date, sets };
+  }
+
+  function renderSessionMode(profile) {
+    const root = document.getElementById('session-mode-root');
+    if (!root || !sm) return;
+    if (sm.finished) { root.innerHTML = htmlSmSummary(profile); wireSmSummary(profile); return; }
+    const ex = sm.exercises[sm.exIndex];
+    const vals = sm.values[sm.exIndex];
+    const last = lastTimeFor(profile, ex.name);
+    const doneCount = sm.values.flat().filter(v => v.done).length;
+    const totalCount = sm.values.flat().length;
+    root.innerHTML = `
+      <div class="session-mode">
+        <div class="session-mode-head">
+          <button class="btn btn-icon" id="sm-close" aria-label="Cerrar sesión">✕</button>
+          <div class="prog">${sm.short ? 'Versión corta · ' : ''}Ejercicio ${sm.exIndex + 1} de ${sm.exercises.length} · ${doneCount}/${totalCount} series</div>
+          <button class="btn" id="sm-finish">Terminar</button>
+        </div>
+        <div class="session-mode-body">
+          <h2 class="sm-exname">${esc(ex.name)}</h2>
+          <div class="sm-exmeta">${esc(ex.muscleLabel)} ${sm.short ? `· ~${ex.durationMin} min` : ''}</div>
+          ${htmlExerciseImage(ex)}
+          ${last ? `<div class="sm-last ${last.sets.some(s => s.setType === 'top') ? 'sm-last-top' : ''}">
+            <b>Última vez</b> (${fmtDate(last.date)}): ${last.sets.map(s => `${s.setType === 'top' ? '🏆 ' : ''}<span class="v">${n1(s.weight)} ${profile.data.plateUnit || 'kg'} × ${s.reps}</span>`).join(' · ')}
+          </div>` : `<div class="sm-last">Primera vez que registrás este ejercicio.</div>`}
+          ${htmlPlateBarsForExercise(profile, ex, last)}
+          ${ex.sets.map((st, i) => htmlSmSet(st, i, vals[i], profile.data.plateUnit || 'kg')).join('')}
+        </div>
+        <div class="session-mode-foot">
+          <button class="btn btn-icon" id="sm-prev" ${sm.exIndex === 0 ? 'disabled' : ''} aria-label="Ejercicio anterior">‹</button>
+          <button class="btn btn-primary" id="sm-next" style="flex:1">${sm.exIndex === sm.exercises.length - 1 ? 'Finalizar ejercicios' : 'Siguiente ejercicio'}</button>
+          <button class="btn btn-icon" id="sm-next-arrow" ${sm.exIndex === sm.exercises.length - 1 ? 'disabled' : ''} aria-label="Ejercicio siguiente">›</button>
+        </div>
+      </div>`;
+    wireSessionMode(profile);
+  }
+
+  function htmlSmSet(st, i, v, unit) {
+    const label = { top: 'Top set', backoff: 'Back-off', normal: `Serie ${st.setNumber}` }[st.setType];
+    return `<div class="sm-set ${v.done ? 'done' : ''}" data-set="${i}">
+      <div class="idx">${label === `Serie ${st.setNumber}` ? st.setNumber : (st.setType === 'top' ? '🏆' : '↓')}</div>
+      <div class="fieldwrap"><input type="number" inputmode="decimal" placeholder="${unit}" value="${v.weight || ''}" data-sm-weight="${i}" ${v.done ? 'disabled' : ''}><div class="unit">peso (${unit})</div></div>
+      <div class="fieldwrap"><input type="number" inputmode="numeric" placeholder="${st.repsLabel}" value="${v.reps || ''}" data-sm-reps="${i}" ${v.done ? 'disabled' : ''}><div class="unit">reps (obj. ${esc(st.repsLabel)})</div></div>
+      <button class="btn ${v.done ? '' : 'btn-primary'} done-btn" data-sm-done="${i}" ${v.done ? 'disabled' : ''}>${v.done ? '✓' : 'Hecha'}</button>
+    </div>`;
+  }
+
+  function wireSessionMode(profile) {
+    const root = document.getElementById('session-mode-root');
+    $('#sm-close').onclick = () => { if (confirm('¿Salir del modo sesión? Lo ya registrado queda guardado.')) endSessionMode(); };
+    $('#sm-finish').onclick = () => { sm.finished = true; renderSessionMode(profile); };
+    $('#sm-prev').onclick = () => { sm.exIndex = Math.max(0, sm.exIndex - 1); renderSessionMode(profile); };
+    const next = () => {
+      if (sm.exIndex < sm.exercises.length - 1) { sm.exIndex++; renderSessionMode(profile); }
+      else { sm.finished = true; renderSessionMode(profile); }
+    };
+    $('#sm-next').onclick = next;
+    const nextArrow = $('#sm-next-arrow'); if (nextArrow) nextArrow.onclick = () => { if (sm.exIndex < sm.exercises.length - 1) { sm.exIndex++; renderSessionMode(profile); } };
+    root.querySelectorAll('[data-sm-weight]').forEach(inp => inp.oninput = () => { sm.values[sm.exIndex][Number(inp.dataset.smWeight)].weight = inp.value; });
+    root.querySelectorAll('[data-sm-reps]').forEach(inp => inp.oninput = () => { sm.values[sm.exIndex][Number(inp.dataset.smReps)].reps = inp.value; });
+    root.querySelectorAll('[data-sm-done]').forEach(btn => btn.onclick = () => smLogSet(profile, Number(btn.dataset.smDone)));
+  }
+
+  function smLogSet(profile, setIdx) {
+    const ex = sm.exercises[sm.exIndex], st = ex.sets[setIdx], v = sm.values[sm.exIndex][setIdx];
+    const reps = parseInt(v.reps, 10);
+    if (!reps || reps <= 0) { toast('Poné las repeticiones hechas.'); return; }
+    const weight = parseFloat(v.weight) || 0;
+    v.weight = weight; v.reps = reps; v.done = true;
+    profile.workouts = profile.workouts || [];
+    profile.workouts.push({
+      sessionId: sm.sessionId, date: todayIso(), dayIndex: sm.dayIndex, dayName: sm.dayName,
+      exercise: ex.name, muscle: ex.muscle, setType: st.setType, setNumber: st.setNumber,
+      weight, reps, short: sm.short, savedAt: Date.now(),
+    });
+    profile.updatedAt = todayIso();
+    save();
+    renderSessionMode(profile);
+    startRestTimer(st.restLabel);
+  }
+
+  function startRestTimer(restLabel) {
+    const total = parseRestSeconds(restLabel);
+    smTimerState = { remaining: total };
+    const root = document.getElementById('session-mode-root');
+    closeTimer();
+    const ov = document.createElement('div'); ov.className = 'timer-overlay'; ov.id = 'sm-timer';
+    ov.innerHTML = `<div class="timer-label">Descanso</div><div class="timer-num" id="sm-timer-num">${fmtTimer(total)}</div>
+      <div class="timer-actions"><button class="btn btn-lg" id="sm-timer-plus30">+30 s</button><button class="btn btn-primary btn-lg" id="sm-timer-skip">Saltar</button></div>`;
+    root.appendChild(ov);
+    $('#sm-timer-plus30').onclick = () => { smTimerState.remaining += 30; };
+    $('#sm-timer-skip').onclick = () => closeTimer();
+    smTimerInterval = setInterval(() => {
+      smTimerState.remaining -= 1;
+      const numEl = document.getElementById('sm-timer-num');
+      if (numEl) numEl.textContent = fmtTimer(Math.max(0, smTimerState.remaining));
+      if (smTimerState.remaining <= 0) { if (navigator.vibrate) navigator.vibrate([200, 100, 200]); closeTimer(); }
+    }, 1000);
+  }
+  function closeTimer() {
+    if (smTimerInterval) { clearInterval(smTimerInterval); smTimerInterval = null; }
+    const ov = document.getElementById('sm-timer'); if (ov) ov.remove();
+  }
+
+  function htmlSmSummary(profile) {
+    const flatVals = sm.values.flat();
+    const doneCount = flatVals.filter(v => v.done).length;
+    const pending = sm.exercises.filter((e, i) => sm.values[i].some(v => !v.done)).map(e => e.name);
+    const durationMin = Math.max(1, Math.round((Date.now() - sm.startedAt) / 60000));
+    const topSets = [];
+    sm.exercises.forEach((e, i) => e.sets.forEach((st, j) => { const v = sm.values[i][j]; if (st.setType === 'top' && v.done) topSets.push({ name: e.name, weight: v.weight, reps: v.reps }); }));
+    return `<div class="session-mode">
+      <div class="session-mode-head"><div></div><div class="prog">Resumen de la sesión</div><div></div></div>
+      <div class="session-mode-body">
+        <div class="card accent">
+          <h2>${esc(sm.dayName)} ${sm.short ? '· versión corta' : ''}</h2>
+          <div class="grid">
+            <div class="stat"><div class="v">${doneCount}</div><div class="l">series hechas</div></div>
+            <div class="stat"><div class="v">${durationMin}</div><div class="l">min reales</div></div>
+          </div>
+        </div>
+        ${topSets.length ? `<div class="card"><h3>Top sets del día</h3><ul>${topSets.map(t => `<li><b>${esc(t.name)}</b>: ${n1(t.weight)} kg × ${t.reps}</li>`).join('')}</ul></div>` : ''}
+        ${pending.length ? `<div class="card"><h3>Ejercicios con series sin terminar</h3><ul>${pending.map(n => `<li>${esc(n)}</li>`).join('')}</ul></div>` : '<div class="card"><p class="muted">Todas las series quedaron registradas. ¡Bien ahí!</p></div>'}
+        <button class="btn btn-primary btn-block btn-lg" id="sm-back-to-plan">Volver al plan</button>
+      </div>
+    </div>`;
+  }
+  function wireSmSummary() { $('#sm-back-to-plan').onclick = () => { endSessionMode(); render(); }; }
+
   /* ---------- Progreso ---------- */
   function renderProgress() {
     const p = active();
     if (!p) { view.innerHTML = '<div class="empty"><div class="big">📈</div><p>Abre un perfil para registrar su progreso.</p></div>'; return; }
     const plan = ENGINE.buildPlan(p.data, todayIso());
     const log = (p.log || []).slice().sort((a, b) => a.date.localeCompare(b.date));
+    const workouts = p.workouts || [];
+    const exNames = [...new Set(workouts.map(w => w.exercise))];
+    if (!ui.strengthExercise || !exNames.includes(ui.strengthExercise)) ui.strengthExercise = exNames[0] || null;
     view.innerHTML = `
       <div class="card accent">
         <h2>Progreso · ${esc(p.data.name)}</h2>
         <form id="log-form">
           <div class="row2">
+            <div><label>Peso (kg)</label><input name="weightKg" type="number" step="0.1" inputmode="decimal" required autofocus></div>
             <div><label>Fecha</label><input name="date" type="date" value="${todayIso()}" required></div>
-            <div><label>Peso (kg)</label><input name="weightKg" type="number" step="0.1" inputmode="decimal" required></div>
           </div>
           <div class="row3">
             <div><label>% grasa</label><input name="bodyFatPct" type="number" step="0.1" inputmode="decimal"></div>
@@ -506,21 +900,25 @@
           </div>
           <div class="row2">
             <div><label>Cadera (cm)</label><input name="hipCm" type="number" step="0.5" inputmode="decimal"></div>
-            <div><label>Notas</label><input name="notes" placeholder="energía, fuerza, sueño…"></div>
           </div>
+          <div><label>Notas</label><input name="notes" placeholder="energía, fuerza, sueño…" style="width:100%"></div>
           <div class="btn-row"><button class="btn btn-primary btn-block" type="submit">Guardar medición</button></div>
         </form>
       </div>
       <div class="card">
         <h3>Peso vs. objetivo</h3>
-        ${chart(log, plan)}
-        <p class="help">Línea roja: peso objetivo (${n1(plan.targets.targetWeight)} kg). Ritmo previsto: ${plan.input.goal === 'cut' ? '−' : '+'}${n1(plan.targets.rateKg * 1000)} g/semana.</p>
+        ${weightChart(log, plan)}
+        <p class="help">${rateLabel(plan)}</p>
+      </div>
+      <div class="card">
+        <h3>Fuerza</h3>
+        ${strengthSection(workouts)}
       </div>
       <div class="card">
         <h3>Historial</h3>
         ${log.length ? `<table><tr><th>Fecha</th><th class="num">Peso</th><th class="num">% grasa</th><th class="num">Cintura</th><th></th></tr>
         ${log.slice().reverse().map((e, i) => `<tr><td>${fmtDate(e.date)}<br><small>${esc(e.notes || '')}</small></td><td class="num">${n1(e.weightKg)} kg</td><td class="num">${e.bodyFatPct ? n1(e.bodyFatPct) + ' %' : '—'}</td><td class="num">${e.waistCm ? n1(e.waistCm) : '—'}</td><td class="num"><button class="btn btn-ghost" data-del="${log.length - 1 - i}" title="Eliminar">✕</button></td></tr>`).join('')}</table>` : '<p class="muted">Sin mediciones todavía.</p>'}
-        ${log.length ? '<div class="btn-row"><button class="btn" id="btn-apply">Usar la última medición como datos actuales y recalcular</button></div>' : ''}
+        ${log.length ? '<div class="btn-row"><button class="btn" id="btn-apply">Usar la última medición y recalcular</button></div>' : ''}
       </div>`;
 
     $('#log-form').onsubmit = e => {
@@ -535,8 +933,12 @@
       const idx = Number(b.dataset.del); const sorted = log; const target = sorted[idx];
       p.log = p.log.filter(x => x !== target); save(); renderProgress();
     });
+    const sel = $('#strength-exercise-select');
+    if (sel) sel.onchange = () => { ui.strengthExercise = sel.value; renderProgress(); };
     const apply = $('#btn-apply');
-    if (apply) apply.onclick = () => {
+    if (apply) apply.onclick = async () => {
+      const ok = await confirmModal('Esto recalcula calorías y proteína del plan. ¿Continuar?', { confirmLabel: 'Recalcular', cancelLabel: 'Cancelar' });
+      if (!ok) return;
       const last = log[log.length - 1];
       p.data.weightKg = last.weightKg;
       if (last.bodyFatPct) p.data.bodyFatPct = last.bodyFatPct;
@@ -547,24 +949,92 @@
     };
   }
 
-  function chart(log, plan) {
-    const W = 340, H = 160, L = 36, R = 8, T = 10, B = 24;
+  function rateLabel(plan) {
+    if (plan.input.goal === 'maintain') return 'Mantenimiento: sin ritmo de cambio de peso proyectado.';
+    const sign = plan.input.goal === 'cut' ? '−' : '+';
+    return `Ritmo previsto: ${sign}${n2(Math.abs(plan.targets.rateKg))} kg/semana · objetivo ${n1(plan.targets.targetWeight)} kg.`;
+  }
+
+  function weightChart(log, plan) {
+    const W = 340, H = 180, L = 40, R = 10, T = 10, B = 24;
+    if (log.length < 2) return `<p class="muted">Registrá tu peso 3-4 veces por semana, en ayunas, para ver la tendencia.</p>`;
     const target = plan.targets.targetWeight;
-    if (log.length === 0) return `<svg class="chart" viewBox="0 0 ${W} ${H}"><text x="${W / 2}" y="${H / 2}" text-anchor="middle">Registra mediciones para ver la gráfica</text></svg>`;
     const xs = log.map(e => new Date(e.date + 'T00:00:00').getTime());
     const ys = log.map(e => e.weightKg);
-    const x0 = Math.min(...xs), x1 = Math.max(...xs, x0 + 7 * 86400000);
-    const yMin = Math.min(...ys, target) - 1, yMax = Math.max(...ys, target) + 1;
+    const projecting = plan.input.goal !== 'maintain';
+    const estDate = new Date(plan.targets.estimatedDate + 'T00:00:00').getTime();
+    const x0 = Math.min(...xs), x1 = Math.max(...xs, x0 + 7 * 86400000, projecting ? estDate : x0);
+    const yVals = projecting ? [...ys, target] : ys;
+    const yMin = Math.min(...yVals) - 1, yMax = Math.max(...yVals) + 1;
     const X = x => L + (x - x0) / (x1 - x0) * (W - L - R);
     const Y = y => T + (yMax - y) / (yMax - yMin) * (H - T - B);
-    const path = log.map((e, i) => `${i ? 'L' : 'M'}${X(xs[i]).toFixed(1)},${Y(ys[i]).toFixed(1)}`).join(' ');
-    const dots = log.map((e, i) => `<circle class="dot" cx="${X(xs[i]).toFixed(1)}" cy="${Y(ys[i]).toFixed(1)}" r="3"><title>${fmtDate(e.date)}: ${n1(e.weightKg)} kg</title></circle>`).join('');
+
+    // Pesajes casi diarios (mediana del intervalo entre mediciones <= 2 días):
+    // la línea principal pasa a ser la media móvil de 7 días, y cada pesaje
+    // individual queda como punto tenue de fondo.
+    const gaps = []; for (let i = 1; i < xs.length; i++) gaps.push((xs[i] - xs[i - 1]) / 86400000);
+    gaps.sort((a, b) => a - b);
+    const medianGap = gaps.length ? gaps[Math.floor(gaps.length / 2)] : Infinity;
+    const nearDaily = log.length >= 5 && medianGap <= 2;
+
+    let mainPath, dotsHtml;
+    if (nearDaily) {
+      const ma = log.map((e, i) => {
+        const windowStart = xs[i] - 6 * 86400000;
+        const inWindow = log.filter((_, j) => xs[j] >= windowStart && xs[j] <= xs[i]);
+        return inWindow.reduce((s, x) => s + x.weightKg, 0) / inWindow.length;
+      });
+      mainPath = ma.map((y, i) => `${i ? 'L' : 'M'}${X(xs[i]).toFixed(1)},${Y(y).toFixed(1)}`).join(' ');
+      dotsHtml = log.map((e, i) => `<circle class="dot-faint" cx="${X(xs[i]).toFixed(1)}" cy="${Y(e.weightKg).toFixed(1)}" r="2.2"><title>${fmtDate(e.date)}: ${n1(e.weightKg)} kg</title></circle>`).join('');
+    } else {
+      mainPath = log.map((e, i) => `${i ? 'L' : 'M'}${X(xs[i]).toFixed(1)},${Y(e.weightKg).toFixed(1)}`).join(' ');
+      dotsHtml = log.map((e, i) => `<circle class="dot" cx="${X(xs[i]).toFixed(1)}" cy="${Y(e.weightKg).toFixed(1)}" r="3"><title>${fmtDate(e.date)}: ${n1(e.weightKg)} kg</title></circle>`).join('');
+    }
+    const projection = projecting ? `<line class="line2" x1="${X(xs[0]).toFixed(1)}" y1="${Y(ys[0]).toFixed(1)}" x2="${X(estDate).toFixed(1)}" y2="${Y(target).toFixed(1)}"/>` : '';
     const ticks = [yMin + 1, (yMin + yMax) / 2, yMax - 1].map(v => `<text x="${L - 4}" y="${Y(v) + 3}" text-anchor="end">${n1(v)}</text>`).join('');
     return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Evolución del peso">
       <line class="axis" x1="${L}" y1="${T}" x2="${L}" y2="${H - B}"/><line class="axis" x1="${L}" y1="${H - B}" x2="${W - R}" y2="${H - B}"/>
       <line class="target" x1="${L}" y1="${Y(target)}" x2="${W - R}" y2="${Y(target)}"/>
-      ${ticks}<path class="line" d="${path}"/>${dots}
+      ${projection}
+      ${ticks}<path class="line" d="${mainPath}"/>${dotsHtml}
       <text x="${L}" y="${H - 6}">${fmtDate(log[0].date)}</text><text x="${W - R}" y="${H - 6}" text-anchor="end">${fmtDate(log[log.length - 1].date)}</text>
+    </svg>`;
+  }
+
+  function strengthSection(workouts) {
+    if (!workouts.length) return '<p class="muted">Completá dos sesiones para ver tu evolución de fuerza.</p>';
+    const names = [...new Set(workouts.map(w => w.exercise))];
+    const selector = `<select id="strength-exercise-select">${names.map(n => `<option value="${esc(n)}" ${n === ui.strengthExercise ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>`;
+    const points = strengthPointsFor(workouts, ui.strengthExercise);
+    if (points.length < 2) return `${selector}<p class="muted">Completá dos sesiones para ver tu evolución de fuerza.</p>`;
+    return `${selector}${strengthChart(points)}<p class="help">Marca hueca = sesión corta.</p>`;
+  }
+
+  function strengthPointsFor(workouts, exerciseName) {
+    const byDate = {};
+    workouts.filter(w => w.exercise === exerciseName).forEach(w => { (byDate[w.date] = byDate[w.date] || []).push(w); });
+    return Object.keys(byDate).sort().map(date => {
+      const sets = byDate[date];
+      const best = sets.find(s => s.setType === 'top') || sets.slice().sort((a, b) => b.weight - a.weight)[0];
+      return { date, weight: best.weight, reps: best.reps, short: sets.some(s => s.short) };
+    });
+  }
+
+  function strengthChart(points) {
+    const W = 340, H = 160, L = 36, R = 8, T = 10, B = 24;
+    const xs = points.map(p => new Date(p.date + 'T00:00:00').getTime());
+    const ys = points.map(p => p.weight);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs, x0 + 7 * 86400000);
+    const yMin = Math.min(...ys) - 2.5, yMax = Math.max(...ys) + 2.5;
+    const X = x => L + (x - x0) / (x1 - x0) * (W - L - R);
+    const Y = y => T + (yMax - y) / (yMax - yMin) * (H - T - B);
+    const path = points.map((p, i) => `${i ? 'L' : 'M'}${X(xs[i]).toFixed(1)},${Y(ys[i]).toFixed(1)}`).join(' ');
+    const dots = points.map((p, i) => `<circle class="${p.short ? 'dot-short' : 'dot'}" cx="${X(xs[i]).toFixed(1)}" cy="${Y(ys[i]).toFixed(1)}" r="3.5"><title>${fmtDate(p.date)}: ${n1(p.weight)} kg × ${p.reps}${p.short ? ' (sesión corta)' : ''}</title></circle>`).join('');
+    const ticks = [yMin + 1, (yMin + yMax) / 2, yMax - 1].map(v => `<text x="${L - 4}" y="${Y(v) + 3}" text-anchor="end">${n1(v)}</text>`).join('');
+    return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Evolución del top set">
+      <line class="axis" x1="${L}" y1="${T}" x2="${L}" y2="${H - B}"/><line class="axis" x1="${L}" y1="${H - B}" x2="${W - R}" y2="${H - B}"/>
+      ${ticks}<path class="line" d="${path}"/>${dots}
+      <text x="${L}" y="${H - 6}">${fmtDate(points[0].date)}</text><text x="${W - R}" y="${H - 6}" text-anchor="end">${fmtDate(points[points.length - 1].date)}</text>
     </svg>`;
   }
 

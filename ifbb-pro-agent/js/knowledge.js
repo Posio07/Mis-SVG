@@ -93,6 +93,20 @@
       url: 'https://pubmed.ncbi.nlm.nih.gov/19204579/',
       type: 'Posicionamiento oficial de sociedad científica',
     },
+    BICKEL_2011: {
+      id: 'BICKEL_2011',
+      short: 'Bickel, Cross & Bamman 2011 (Med Sci Sports Exerc)',
+      title: 'Bickel CS, Cross JM, Bamman MM. Exercise dosing to retain resistance training adaptations in young and older adults. Med Sci Sports Exerc 2011;43(7):1177-87. Variar la intensidad dentro de un mismo bloque de entrenamiento (series más pesadas y más livianas) mantiene las adaptaciones de fuerza con menor fatiga acumulada.',
+      url: 'https://pubmed.ncbi.nlm.nih.gov/21131862/',
+      type: 'Artículo revisado por pares',
+    },
+    SPIERING_2021: {
+      id: 'SPIERING_2021',
+      short: 'Spiering et al. 2021 (J Strength Cond Res)',
+      title: 'Spiering BA, Mujika I, Sharp MH, Foster C. Progressive overload: a necessary perspective for improving muscular strength and relevant long-term adaptations. J Strength Cond Res 2021;35(10):2919-33. La sobrecarga progresiva requiere series puntuales a intensidad máxima (cercanas al límite) combinadas con series de trabajo a menor intensidad.',
+      url: 'https://pubmed.ncbi.nlm.nih.gov/34132710/',
+      type: 'Revisión revisada por pares',
+    },
     SCHOENFELD_VOL: {
       id: 'SCHOENFELD_VOL',
       short: 'Schoenfeld, Ogborn & Krieger 2017 (J Sports Sci)',
@@ -367,5 +381,19 @@
     { name: 'Multivitamínico / vitamina D', dose: 'Según analítica', source: 'HELMS_NUT', note: 'Recomendado en dietas de preparación prolongadas por riesgo de deficiencias. Confirmar con análisis de sangre.' },
   ];
 
-  return { SOURCES, ACTIVITY, DIVISIONS, CLASSIC_WEIGHT_TABLE, EXERCISES, FUNCTIONAL_EXERCISES, MUSCLE_LABELS, SUPPLEMENTS };
+  /* Fase 5: discos olímpicos. El orden (de mayor a menor) define tanto el
+   * reparto al cargar la barra como el color oficial de cada disco; ambas
+   * listas están alineadas índice a índice con PLATE_COLORS. Los colores en
+   * kg son el estándar IWF/competición. En libras no existe un estándar tan
+   * universal: se usa el esquema más difundido en gimnasios (rojo/azul/
+   * amarillo/verde/blanco/gris en el mismo orden), que es una convención
+   * frecuente pero no una norma única. */
+  const PLATES_KG = [25, 20, 15, 10, 5, 2.5, 1.25];
+  const PLATES_LB = [55, 45, 35, 25, 10, 5, 2.5];
+  const PLATE_COLORS = ['var(--disco-rojo)', 'var(--disco-azul)', 'var(--disco-amarillo)', 'var(--disco-verde)', 'var(--disco-blanco)', 'var(--disco-gris)', 'var(--disco-gris)'];
+  const DEFAULT_BAR_WEIGHT = { kg: 20, lb: 45 };
+  // Ejercicios de barra elegibles para dibujar la carga (mismos patrones de DEC-008).
+  const BARBELL_PATTERNS = new Set(['squat_bilateral', 'bench_press', 'shoulder_press', 'hinge', 'row_barbell', 'hip_thrust']);
+
+  return { SOURCES, ACTIVITY, DIVISIONS, CLASSIC_WEIGHT_TABLE, EXERCISES, FUNCTIONAL_EXERCISES, MUSCLE_LABELS, SUPPLEMENTS, PLATES_KG, PLATES_LB, PLATE_COLORS, DEFAULT_BAR_WEIGHT, BARBELL_PATTERNS };
 });
