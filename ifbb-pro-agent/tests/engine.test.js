@@ -375,3 +375,84 @@ test('every source referenced by plan exists in knowledge base', () => {
   plan.sourcesUsed.forEach(id => assert.ok(K.SOURCES[id], `missing source ${id}`));
   K.SUPPLEMENTS.forEach(s => assert.ok(K.SOURCES[s.source]));
 });
+
+/* ---------- DEC-009: condiciones de salud y lesiones ---------- */
+
+test('DEC-009 Capa 1: síntomas bloquea el plan hasta marcar autorización médica', () => {
+  const withSymptoms = Object.assign({}, male, { healthSymptoms: true });
+  const blocked = E.buildPlan(withSymptoms, TODAY);
+  assert.equal(blocked.health.blocked, true);
+  assert.ok(/consultá a un médico/i.test(blocked.health.blockReason));
+
+  const cleared = Object.assign({}, withSymptoms, { healthMedicalClearance: true });
+  const unblocked = E.buildPlan(cleared, TODAY);
+  assert.equal(unblocked.health.blocked, false);
+});
+
+test('DEC-009 Capa 1: condición cardiovascular/metabólica/renal sin entrenar de forma regular también bloquea; entrenando regular solo avisa', () => {
+  const sedentary = Object.assign({}, male, { healthCvMetabolicRenal: true, healthRegularExercise: false });
+  const planSedentary = E.buildPlan(sedentary, TODAY);
+  assert.equal(planSedentary.health.blocked, true);
+
+  const active = Object.assign({}, male, { healthCvMetabolicRenal: true, healthRegularExercise: true });
+  const planActive = E.buildPlan(active, TODAY);
+  assert.equal(planActive.health.blocked, false);
+  assert.equal(planActive.health.medicalClearanceRecommended, true);
+});
+
+test('DEC-009 Capa 2: diabetes con insulina avisa pero no cambia ningún número del plan', () => {
+  const diabetic = Object.assign({}, male, { diabetesType: 'type2', healthDiabetesMed: true });
+  const planBase = E.buildPlan(male, TODAY);
+  const planDiabetic = E.buildPlan(diabetic, TODAY);
+  assert.ok(planDiabetic.health.diabetesWarning, 'debería avisar riesgo de hipoglucemia');
+  assert.ok(planDiabetic.health.weightLossMedWarning, 'en definición debería avisar sobre ajustar medicación');
+  ['metrics', 'targets', 'nutrition', 'training', 'supplements'].forEach(key => {
+    assert.deepEqual(stripHealthNoise(planDiabetic[key]), stripHealthNoise(planBase[key]), `${key} no debería cambiar por diabetes`);
+  });
+  // sin medicación, o sin diabetes: sin avisos de diabetes
+  const noMed = Object.assign({}, male, { diabetesType: 'type2', healthDiabetesMed: false });
+  assert.equal(E.buildPlan(noMed, TODAY).health.diabetesWarning, null);
+});
+
+test('DEC-009 Capa 3: lesión de hombro excluye shoulder_press, aparece el sustituto, avisa evaluación profesional y el volumen de hombro no cambia', () => {
+  const injured = Object.assign({}, male, { injuryZones: ['shoulder'] });
+  const planBase = E.buildPlan(male, TODAY);
+  const planInjured = E.buildPlan(injured, TODAY);
+
+  const allEx = s => s.training.sessions.flatMap(d => d.exercises);
+  assert.ok(!allEx(planInjured).some(e => e.pattern === 'shoulder_press'), 'no debería quedar ningún shoulder_press en el plan');
+  assert.ok(allEx(planInjured).some(e => e.pattern === 'shoulder_press_safe'), 'debería aparecer el sustituto');
+  assert.ok(planInjured.warnings.some(w => /evaluación profesional/.test(w.text)), 'sin diagnóstico, debería avisar evaluación profesional');
+
+  assert.equal(planInjured.training.weeklySets.shoulders, planBase.training.weeklySets.shoulders, 'el volumen semanal de hombro no debería cambiar');
+  const shoulderSets = plan => allEx(plan).filter(e => e.muscle === 'shoulders').reduce((a, e) => a + e.sets, 0);
+  assert.equal(shoulderSets(planInjured), shoulderSets(planBase), 'las series reales de hombro en el plan no deberían cambiar');
+
+  // con diagnóstico, no debería avisar "evaluación profesional"
+  const diagnosed = Object.assign({}, male, { injuryZones: ['shoulder'], injuryDiagnosed: ['shoulder'] });
+  const planDiagnosed = E.buildPlan(diagnosed, TODAY);
+  assert.ok(!planDiagnosed.warnings.some(w => /evaluación profesional/.test(w.text)));
+});
+
+test('DEC-009: sin condiciones de salud declaradas, el plan queda idéntico al que generaba el motor antes de DEC-009', () => {
+  const plan = E.buildPlan(male, TODAY);
+  assert.equal(plan.health.blocked, false);
+  assert.equal(plan.health.anyCondition, false);
+  assert.equal(plan.health.disclaimer, null);
+  // normalizeProfile es idempotente sobre un perfil ya normalizado y
+  // guardado (sin los campos planos del formulario): re-normalizar no
+  // debería resetear nada de lo ya guardado.
+  const stored = E.normalizeProfile(male);
+  const reNormalized = E.normalizeProfile(stored);
+  assert.deepEqual(reNormalized.health, stored.health);
+});
+
+function stripHealthNoise(obj) {
+  // compara todo salvo listas de fuentes citadas, que sí pueden sumar
+  // RIEBE_2015/COLBERG_2016/KANALEY_2022/SILBERNAGEL_2007 sin que eso
+  // sea un cambio real de ningún número del plan.
+  const c = JSON.parse(JSON.stringify(obj));
+  delete c.sources;
+  delete c.warnings;
+  return c;
+}

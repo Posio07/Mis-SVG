@@ -145,6 +145,7 @@
       ${items || `<div class="empty"><div class="big">${icon('person')}</div><p>Aún no hay perfiles.<br>Crea el primero para obtener tu plan.</p></div>`}
       ${active() ? `<div class="card">
         <h3>Perfil activo: ${esc(active().data.name)}</h3>
+        ${(() => { const hs = ENGINE.computeHealthScreen(ENGINE.normalizeProfile(active().data)); return hs.anyCondition ? `<p class="muted" style="font-size:.78rem">${esc(hs.disclaimer)}</p>` : ''; })()}
         <div class="btn-row">
           <button class="btn" id="btn-edit">Editar datos</button>
           <button class="btn" id="btn-dup">Duplicar</button>
@@ -218,12 +219,36 @@
     return canon.map(p => `<label style="display:flex;align-items:center;gap:.4rem;margin:.2rem 0;font-size:.85rem;color:var(--tiza)"><input type="checkbox" name="availablePlates" value="${p}" style="width:auto" ${sel.includes(p) ? 'checked' : ''}> ${n1(p)} ${unit}</label>`).join('');
   }
 
+  /* DEC-009: una fila por zona de lesión, con el diagnóstico y el dolor
+   * actual ocultos hasta marcar la zona (JS, puramente visual: lo que
+   * decide qué cuenta es normalizeHealth en engine.js). */
+  function injuryZoneRow(zone, label, inj) {
+    const checked = !!inj;
+    // Nota: no usar `hidden` + estilo inline `display` en el mismo
+    // elemento. El estilo inline siempre le gana a la regla [hidden] de
+    // la hoja del navegador, así que quedaría visible igual. El propio
+    // display inline (none/flex) es lo único que hace falta.
+    return `<div class="injury-zone" data-zone="${zone}">
+      <label style="display:flex;align-items:center;gap:.5rem;margin:.25rem 0"><input type="checkbox" name="injuryZones" value="${zone}" class="injury-toggle" style="width:auto" ${checked ? 'checked' : ''}> ${esc(label)}</label>
+      <div class="injury-sub" style="padding-left:1.7rem;display:${checked ? 'flex' : 'none'};gap:1.1rem;flex-wrap:wrap;margin:0 0 .6rem">
+        <label style="display:flex;align-items:center;gap:.4rem;font-size:.82rem;color:var(--acero)"><input type="checkbox" name="injuryDiagnosed" value="${zone}" style="width:auto" ${inj && inj.diagnosed ? 'checked' : ''}> Diagnóstico profesional</label>
+        <label style="display:flex;align-items:center;gap:.4rem;font-size:.82rem;color:var(--acero)"><input type="checkbox" name="injuryPainNow" value="${zone}" style="width:auto" ${inj && inj.painNow ? 'checked' : ''}> Dolor actualmente</label>
+      </div>
+    </div>`;
+  }
+
   /* ---------- Datos ---------- */
   function renderData() {
     const editing = ui.editingId ? state.profiles.find(p => p.id === ui.editingId) : null;
     const d = editing ? editing.data : { sex: 'M', activity: 'moderate', level: 'intermediate', daysPerWeek: 4, goal: 'cut', division: 'classic_m' };
     const opt = (list, val, fmt) => list.map(x => `<option value="${esc(fmt ? fmt(x).v : x.id)}" ${(fmt ? fmt(x).v : x.id) === val ? 'selected' : ''}>${esc(fmt ? fmt(x).l : x.label)}</option>`).join('');
     const divisions = Object.values(KNOWLEDGE.DIVISIONS);
+    // DEC-009: estructura por defecto si el perfil todavía no tiene datos de salud.
+    const h = Object.assign({ screening: {}, diabetes: { type: 'none' }, injuries: [] }, d.health || {});
+    h.screening = h.screening || {};
+    const injuriesByZone = {};
+    (h.injuries || []).forEach(inj => { injuriesByZone[inj.zone] = inj; });
+    const hasHealthData = !!(h.screening.regularExercise || h.screening.cvMetabolicRenal || h.screening.symptoms || h.screening.medicalClearance || h.diabetes.type !== 'none' || h.diabetes.medication || (h.injuries || []).length);
 
     view.innerHTML = `
       <form id="form" novalidate>
@@ -301,6 +326,29 @@
           <label>Discos disponibles</label>
           <div class="row3" id="plates-wrap">${platesCheckboxes(d.plateUnit || 'kg', d.availablePlates)}</div>
         </fieldset>
+        <fieldset>
+          <legend>Salud</legend>
+          <p class="help">La app NO reemplaza a un médico, fisioterapeuta ni entrenador certificado: solo adapta el plan cuando hay una regla con respaldo científico cargada (DEC-009). Si declarás una condición sin regla cargada, queda registrada pero no cambia nada.</p>
+          <label style="display:flex;align-items:center;gap:.5rem"><input type="checkbox" name="healthRegularExercise" style="width:auto" ${h.screening.regularExercise ? 'checked' : ''}> Hago ejercicio planificado ≥30 min, 3 días/semana, desde hace al menos 3 meses</label>
+          <label style="display:flex;align-items:center;gap:.5rem"><input type="checkbox" name="healthCvMetabolicRenal" style="width:auto" ${h.screening.cvMetabolicRenal ? 'checked' : ''}> Tengo diagnóstico de enfermedad cardiovascular, metabólica (diabetes) o renal</label>
+          <label style="display:flex;align-items:center;gap:.5rem"><input type="checkbox" name="healthSymptoms" style="width:auto" ${h.screening.symptoms ? 'checked' : ''}> Tengo dolor/molestia en el pecho, falta de aire en reposo o con poco esfuerzo, mareo o desmayo, palpitaciones, hinchazón de tobillos, dolor en las piernas al caminar, soplo cardíaco conocido o fatiga inusual</label>
+          <label style="display:flex;align-items:center;gap:.5rem;margin-top:.3rem"><input type="checkbox" name="healthMedicalClearance" style="width:auto" ${h.screening.medicalClearance ? 'checked' : ''}> Tengo autorización médica para entrenar a intensidad vigorosa (vigente, últimos 12 meses)</label>
+          <p class="help">Si marcaste síntomas, o la condición cardiovascular/metabólica/renal sin entrenar de forma regular, el plan queda oculto hasta marcar esta autorización.</p>
+
+          <label style="margin-top:.8rem">Diabetes</label>
+          <select name="diabetesType">
+            <option value="none" ${h.diabetes.type === 'none' ? 'selected' : ''}>Ninguna</option>
+            <option value="type1" ${h.diabetes.type === 'type1' ? 'selected' : ''}>Tipo 1</option>
+            <option value="type2" ${h.diabetes.type === 'type2' ? 'selected' : ''}>Tipo 2</option>
+          </select>
+          <label style="display:flex;align-items:center;gap:.5rem;margin-top:.4rem"><input type="checkbox" name="healthDiabetesMed" style="width:auto" ${h.diabetes.medication ? 'checked' : ''}> Uso insulina u otro fármaco que baja la glucosa</label>
+
+          <label style="margin-top:.8rem">Lesiones (marcá la zona si tenés una)</label>
+          <div id="injury-zones">${KNOWLEDGE.INJURY_ZONES.map(z => injuryZoneRow(z, KNOWLEDGE.INJURY_LABELS[z], injuriesByZone[z])).join('')}</div>
+          <p class="help">Sin diagnóstico profesional, igual se excluyen los ejercicios que suelen cargar esa zona; te recomendamos una evaluación. En Modo sesión vas a poder registrar el dolor de cada serie que la involucre.</p>
+
+          ${hasHealthData ? '<div class="btn-row"><button type="button" class="btn btn-danger" id="btn-clear-health">Borrar datos de salud</button></div>' : ''}
+        </fieldset>
         <div id="form-errors"></div>
         <div class="btn-row">
           <button type="submit" class="btn btn-primary btn-block">Guardar y generar plan</button>
@@ -328,6 +376,16 @@
       $('#barWeight').placeholder = u === 'lb' ? '45' : '20';
       $('#plates-wrap').innerHTML = platesCheckboxes(u, null);
     };
+    view.querySelectorAll('.injury-toggle').forEach(cb => cb.onchange = () => {
+      const sub = cb.closest('.injury-zone').querySelector('.injury-sub');
+      sub.style.display = cb.checked ? 'flex' : 'none';
+    });
+    const btnClearHealth = $('#btn-clear-health');
+    if (btnClearHealth) btnClearHealth.onclick = () => {
+      if (!confirm('¿Borrar todos los datos de salud de este perfil? No afecta el resto de los datos.')) return;
+      editing.data.health = { screening: { regularExercise: false, cvMetabolicRenal: false, symptoms: false, medicalClearance: false }, diabetes: { type: 'none', medication: false }, injuries: [] };
+      editing.updatedAt = todayIso(); save(); toast('Datos de salud borrados'); renderData();
+    };
 
     form.onsubmit = e => {
       e.preventDefault();
@@ -335,6 +393,9 @@
       const data = Object.fromEntries(fd.entries());
       data.laggingMuscles = fd.getAll('laggingMuscles');
       data.availablePlates = fd.getAll('availablePlates');
+      data.injuryZones = fd.getAll('injuryZones');
+      data.injuryDiagnosed = fd.getAll('injuryDiagnosed');
+      data.injuryPainNow = fd.getAll('injuryPainNow');
       const errors = ENGINE.validateProfile(data);
       if (errors.length) { $('#form-errors').innerHTML = errors.map(x => `<div class="alert danger">${esc(x)}</div>`).join(''); window.scrollTo({ top: document.body.scrollHeight }); return; }
       const norm = ENGINE.normalizeProfile(data);
@@ -357,8 +418,12 @@
     const p = active();
     if (!p) { view.innerHTML = `<div class="empty"><div class="big">${icon('barbell')}</div><p>Crea o abre un perfil para ver su plan.</p><button class="btn btn-primary" id="e-new">Nuevo perfil</button></div>`; $('#e-new').onclick = () => go('data'); return; }
     const plan = ENGINE.buildPlan(p.data, todayIso());
+    // DEC-009: si el tamizaje bloquea (síntomas, o condición + sedentarismo,
+    // sin autorización médica marcada), no se muestra el plan.
+    if (plan.health.blocked) { view.innerHTML = htmlHealthBlock(plan); wireHealthBlock(p); return; }
     const tabs = [['summary', 'Resumen'], ['nutrition', 'Dieta'], ['training', 'Entreno'], ['targets', 'Medidas'], ['supps', 'Suplementos']];
     view.innerHTML = `
+      ${plan.health.disclaimer ? `<p class="muted" style="font-size:.78rem">${esc(plan.health.disclaimer)}</p>` : ''}
       <div class="subtabs">${tabs.map(([id, l]) => `<button class="btn ${ui.planTab === id ? 'active' : ''}" data-pt="${id}">${l}</button>`).join('')}</div>
       <div id="plan-body"></div>`;
     view.querySelectorAll('[data-pt]').forEach(b => b.onclick = () => { ui.planTab = b.dataset.pt; renderPlan(); });
@@ -371,6 +436,30 @@
     const share = $('#btn-share');
     if (share) share.onclick = () => sharePlan(plan);
     if (ui.planTab === 'training') wireTrainingDays(plan, p);
+  }
+
+  /* DEC-009: pantalla de bloqueo cuando el tamizaje lo exige. El motor
+   * igual calculó el plan completo (buildPlan es puro); acá se decide no
+   * mostrarlo hasta que el usuario marque la autorización médica. */
+  function htmlHealthBlock(plan) {
+    return `
+      <div class="card accent" style="border-color:var(--peligro)">
+        <h2>Plan en pausa</h2>
+        <div class="alert danger">${esc(plan.health.blockReason)}</div>
+        <p class="muted">Esto no es un diagnóstico: es el resultado del tamizaje previo al ejercicio (ACSM/Riebe 2015) que completaste en Datos. Si ya consultaste y tenés autorización para entrenar a intensidad vigorosa, marcala para continuar.</p>
+        <div class="btn-row">
+          <button class="btn btn-primary" id="btn-medical-clearance">Tengo autorización médica</button>
+          <button class="btn" id="btn-edit-health">Revisar mis respuestas</button>
+        </div>
+      </div>`;
+  }
+  function wireHealthBlock(profile) {
+    $('#btn-medical-clearance').onclick = () => {
+      profile.data.health = profile.data.health || { screening: {}, diabetes: { type: 'none' }, injuries: [] };
+      profile.data.health.screening.medicalClearance = true;
+      profile.updatedAt = todayIso(); save(); toast('Autorización registrada'); renderPlan();
+    };
+    $('#btn-edit-health').onclick = () => { ui.editingId = profile.id; go('data'); };
   }
 
   function wireTrainingDays(plan, profile) {
@@ -757,18 +846,49 @@
     return Math.round(seconds / 60);
   }
 
-  function buildSmExercises(session, short) {
+  // DEC-009 · Capa 3: ¿este grupo muscular queda involucrado por alguna de
+  // las zonas de lesión declaradas? (tenga o no diagnóstico). Más amplio
+  // que "el patrón excluido": un ejercicio que YA es el sustituto (porque
+  // el excluido ni siquiera llega a aparecer en el plan) sigue
+  // involucrando la zona y por eso también lleva escala de dolor.
+  function injuryAffectsMuscle(muscle, zones) {
+    return zones.some(z => KNOWLEDGE.INJURY_EXCLUSIONS[z] && KNOWLEDGE.INJURY_EXCLUSIONS[z][muscle]);
+  }
+  // Alternativa dentro del mismo grupo muscular para un ejercicio marcado
+  // por dolor: el siguiente de la lista del catálogo que no esté excluido
+  // por las zonas declaradas ni sea el propio ejercicio marcado.
+  function findPainSubstitute(pattern, muscle, zones, profile) {
+    const lib = KNOWLEDGE.EXERCISES[muscle] || [];
+    const excluded = new Set([pattern]);
+    zones.forEach(z => { const map = KNOWLEDGE.INJURY_EXCLUSIONS[z]; if (map && map[muscle]) map[muscle].forEach(p => excluded.add(p)); });
+    const flags = (profile.painFlags || {});
+    return lib.find(ex => !excluded.has(ex.pattern) && !(flags[ex.pattern] && flags[ex.pattern].flagged) && (!ex.injuryOnly || zones.indexOf(ex.injuryOnly) !== -1));
+  }
+
+  function buildSmExercises(session, short, profile) {
     let list = session.exercises;
     if (short) list = list.filter(e => e.type === 'compound').slice(0, 2);
+    const zones = ((profile.data.health && profile.data.health.injuries) || []).map(i => i.zone);
+    const flags = profile.painFlags || {};
     return list.map(e => {
-      const sets = [];
-      if (e.topSet) {
-        sets.push({ setType: 'top', setNumber: 1, repsLabel: e.topSet.reps, restLabel: '3 min' });
-        for (let i = 0; i < (e.backoffSets || 0); i++) sets.push({ setType: 'backoff', setNumber: i + 1, repsLabel: e.reps, restLabel: e.rest });
-      } else {
-        for (let i = 0; i < e.sets; i++) sets.push({ setType: 'normal', setNumber: i + 1, repsLabel: e.reps, restLabel: e.rest });
+      let ex = e, substitutedFrom = null;
+      const flag = flags[e.pattern];
+      if (flag && flag.flagged) {
+        const alt = findPainSubstitute(e.pattern, e.muscle, zones, profile);
+        if (alt) { substitutedFrom = e.name; ex = Object.assign({}, e, { name: alt.name, pattern: alt.pattern, reps: `${alt.reps[0]}-${alt.reps[1]}`, topSet: null, backoffSets: 0 }); }
       }
-      return { name: e.name, muscle: e.muscle, muscleLabel: e.muscleLabel, type: e.type, pattern: e.pattern, unilateral: e.unilateral, durationMin: exerciseDurationMin(e), sets };
+      const sets = [];
+      if (ex.topSet) {
+        sets.push({ setType: 'top', setNumber: 1, repsLabel: ex.topSet.reps, restLabel: '3 min' });
+        for (let i = 0; i < (ex.backoffSets || 0); i++) sets.push({ setType: 'backoff', setNumber: i + 1, repsLabel: ex.reps, restLabel: ex.rest });
+      } else {
+        for (let i = 0; i < ex.sets; i++) sets.push({ setType: 'normal', setNumber: i + 1, repsLabel: ex.reps, restLabel: ex.rest });
+      }
+      return {
+        name: ex.name, muscle: ex.muscle, muscleLabel: ex.muscleLabel, type: ex.type, pattern: ex.pattern, unilateral: ex.unilateral,
+        durationMin: exerciseDurationMin(ex), sets, substitutedFrom,
+        painScale: injuryAffectsMuscle(ex.muscle, zones),
+      };
     });
   }
 
@@ -779,12 +899,12 @@
 
   function startSessionMode(profile, plan, dayIndex, short) {
     const session = plan.training.sessions[dayIndex];
-    const exercises = buildSmExercises(session, short);
+    const exercises = buildSmExercises(session, short, profile);
     if (!exercises.length) { toast('Este día no tiene multiarticulares para la versión corta.'); return; }
     sm = {
       profileId: profile.id, sessionId: uid(), dayIndex, dayName: session.name, short,
       exercises, exIndex: 0, startedAt: Date.now(), finished: false,
-      values: exercises.map(e => e.sets.map(() => ({ weight: '', reps: '', done: false }))),
+      values: exercises.map(e => e.sets.map(() => ({ weight: '', reps: '', done: false, pain: '' }))),
     };
     requestWakeLock();
     let root = document.getElementById('session-mode-root');
@@ -828,12 +948,13 @@
         <div class="session-mode-body">
           <h2 class="sm-exname">${esc(ex.name)}</h2>
           <div class="sm-exmeta">${esc(ex.muscleLabel)} ${sm.short ? `· ~${ex.durationMin} min` : ''}</div>
+          ${ex.substitutedFrom ? `<div class="alert warn">Reemplaza a "${esc(ex.substitutedFrom)}" por el dolor registrado la vez pasada. Te sugerimos consultar a un profesional.</div>` : ''}
           ${htmlExerciseImage(ex)}
           ${last ? `<div class="sm-last ${last.sets.some(s => s.setType === 'top') ? 'sm-last-top' : ''}">
             <b>Última vez</b> (${fmtDate(last.date)}): ${last.sets.map(s => `${s.setType === 'top' ? icon('trophy') + ' ' : ''}<span class="v">${n1(s.weight)} ${profile.data.plateUnit || 'kg'} × ${s.reps}</span>`).join(' · ')}
           </div>` : `<div class="sm-last">Primera vez que registrás este ejercicio.</div>`}
           ${htmlPlateBarsForExercise(profile, ex, last)}
-          ${ex.sets.map((st, i) => htmlSmSet(st, i, vals[i], profile.data.plateUnit || 'kg')).join('')}
+          ${ex.sets.map((st, i) => htmlSmSet(st, i, vals[i], profile.data.plateUnit || 'kg', ex.painScale)).join('')}
         </div>
         <div class="session-mode-foot">
           <button class="btn btn-icon" id="sm-prev" ${sm.exIndex === 0 ? 'disabled' : ''} aria-label="Ejercicio anterior">‹</button>
@@ -844,13 +965,16 @@
     wireSessionMode(profile);
   }
 
-  function htmlSmSet(st, i, v, unit) {
+  function htmlSmSet(st, i, v, unit, painScale) {
     const label = { top: 'Top set', backoff: 'Back-off', normal: `Serie ${st.setNumber}` }[st.setType];
     return `<div class="sm-set ${v.done ? 'done' : ''}" data-set="${i}">
-      <div class="idx">${label === `Serie ${st.setNumber}` ? st.setNumber : (st.setType === 'top' ? icon('trophy') : '↓')}</div>
-      <div class="fieldwrap"><input type="number" inputmode="decimal" placeholder="${unit}" value="${v.weight || ''}" data-sm-weight="${i}" ${v.done ? 'disabled' : ''}><div class="unit">peso (${unit})</div></div>
-      <div class="fieldwrap"><input type="number" inputmode="numeric" placeholder="${st.repsLabel}" value="${v.reps || ''}" data-sm-reps="${i}" ${v.done ? 'disabled' : ''}><div class="unit">reps (obj. ${esc(st.repsLabel)})</div></div>
-      <button class="btn ${v.done ? '' : 'btn-primary'} done-btn" data-sm-done="${i}" ${v.done ? 'disabled' : ''}>${v.done ? icon('check', 'check-draw') : 'Hecha'}</button>
+      <div class="sm-set-row">
+        <div class="idx">${label === `Serie ${st.setNumber}` ? st.setNumber : (st.setType === 'top' ? icon('trophy') : '↓')}</div>
+        <div class="fieldwrap"><input type="number" inputmode="decimal" placeholder="${unit}" value="${v.weight || ''}" data-sm-weight="${i}" ${v.done ? 'disabled' : ''}><div class="unit">peso (${unit})</div></div>
+        <div class="fieldwrap"><input type="number" inputmode="numeric" placeholder="${st.repsLabel}" value="${v.reps || ''}" data-sm-reps="${i}" ${v.done ? 'disabled' : ''}><div class="unit">reps (obj. ${esc(st.repsLabel)})</div></div>
+        <button class="btn ${v.done ? '' : 'btn-primary'} done-btn" data-sm-done="${i}" ${v.done ? 'disabled' : ''}>${v.done ? icon('check', 'check-draw') : 'Hecha'}</button>
+      </div>
+      ${painScale ? `<div class="fieldwrap sm-pain"><input type="number" inputmode="numeric" min="0" max="10" placeholder="0-10" value="${v.pain === '' || v.pain == null ? '' : v.pain}" data-sm-pain="${i}" ${v.done ? 'disabled' : ''}><div class="unit">dolor en esta serie (0-10)</div></div>` : ''}
     </div>`;
   }
 
@@ -867,7 +991,24 @@
     const nextArrow = $('#sm-next-arrow'); if (nextArrow) nextArrow.onclick = () => { if (sm.exIndex < sm.exercises.length - 1) { sm.exIndex++; renderSessionMode(profile); } };
     root.querySelectorAll('[data-sm-weight]').forEach(inp => inp.oninput = () => { sm.values[sm.exIndex][Number(inp.dataset.smWeight)].weight = inp.value; });
     root.querySelectorAll('[data-sm-reps]').forEach(inp => inp.oninput = () => { sm.values[sm.exIndex][Number(inp.dataset.smReps)].reps = inp.value; });
+    root.querySelectorAll('[data-sm-pain]').forEach(inp => inp.oninput = () => { sm.values[sm.exIndex][Number(inp.dataset.smPain)].pain = inp.value; });
     root.querySelectorAll('[data-sm-done]').forEach(btn => btn.onclick = () => smLogSet(profile, Number(btn.dataset.smDone)));
+  }
+
+  // DEC-009: marca/desmarca un ejercicio para sustituir según el dolor
+  // registrado. Dolor >5 marca (o reconfirma la marca). Dolor ≤5 solo
+  // desmarca después de 2 sesiones DISTINTAS seguidas sin pasarse de 5.
+  function logPain(profile, pattern, pain) {
+    profile.painFlags = profile.painFlags || {};
+    const rec = profile.painFlags[pattern] || { flagged: false, cleanStreak: 0, lastSessionId: null };
+    const newSession = rec.lastSessionId !== sm.sessionId;
+    if (pain > 5) { rec.flagged = true; rec.cleanStreak = 0; }
+    else if (rec.flagged && newSession) {
+      rec.cleanStreak = (rec.cleanStreak || 0) + 1;
+      if (rec.cleanStreak >= 2) { rec.flagged = false; rec.cleanStreak = 0; }
+    }
+    rec.lastSessionId = sm.sessionId;
+    profile.painFlags[pattern] = rec;
   }
 
   function smLogSet(profile, setIdx) {
@@ -876,11 +1017,13 @@
     if (!reps || reps <= 0) { toast('Poné las repeticiones hechas.'); return; }
     const weight = parseFloat(v.weight) || 0;
     v.weight = weight; v.reps = reps; v.done = true;
+    let pain = null;
+    if (ex.painScale) { pain = v.pain === '' || v.pain == null ? null : Math.min(10, Math.max(0, parseInt(v.pain, 10))); v.pain = pain; if (pain != null) logPain(profile, ex.pattern, pain); }
     profile.workouts = profile.workouts || [];
     profile.workouts.push({
       sessionId: sm.sessionId, date: todayIso(), dayIndex: sm.dayIndex, dayName: sm.dayName,
       exercise: ex.name, muscle: ex.muscle, setType: st.setType, setNumber: st.setNumber,
-      weight, reps, short: sm.short, savedAt: Date.now(),
+      weight, reps, pain, short: sm.short, savedAt: Date.now(),
     });
     profile.updatedAt = todayIso();
     save();

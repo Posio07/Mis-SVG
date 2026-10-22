@@ -184,6 +184,34 @@
       url: 'https://www.who.int/publications/i/item/9789240015128',
       type: 'Organismo regulatorio internacional',
     },
+    RIEBE_2015: {
+      id: 'RIEBE_2015',
+      short: 'ACSM Position Stand: Tamizaje previo al ejercicio (Riebe 2015)',
+      title: 'Riebe D, Franklin BA, Thompson PD, Garber CE, Whitfield GP, Magal M, Pescatello LS. Updating ACSM\'s recommendations for exercise preparticipation health screening. Med Sci Sports Exerc 2015;47(11):2473-9. Algoritmo de tamizaje: actividad habitual, enfermedad cardiovascular/metabólica/renal conocida y síntomas actuales, para decidir si se recomienda autorización médica antes de ejercicio de intensidad moderada a vigorosa.',
+      url: 'https://pubmed.ncbi.nlm.nih.gov/26473759/',
+      type: 'Posicionamiento oficial de sociedad científica',
+    },
+    COLBERG_2016: {
+      id: 'COLBERG_2016',
+      short: 'ADA Position Statement: Ejercicio y diabetes (Colberg 2016)',
+      title: 'Colberg SR et al. Physical activity/exercise and diabetes: a position statement of the American Diabetes Association. Diabetes Care 2016;39(11):2065-79. Precauciones para evitar hipoglucemia asociada al ejercicio en personas que usan insulina u otros fármacos hipoglucemiantes: control de glucosa antes/después, carbohidrato de acción rápida disponible, reconocimiento de síntomas.',
+      url: 'https://pubmed.ncbi.nlm.nih.gov/27926890/',
+      type: 'Posicionamiento oficial de sociedad científica',
+    },
+    KANALEY_2022: {
+      id: 'KANALEY_2022',
+      short: 'ACSM Position Stand: Ejercicio en diabetes tipo 2 (Kanaley 2022)',
+      title: 'Kanaley JA et al. Exercise/physical activity in individuals with type 2 diabetes: a consensus statement from the American College of Sports Medicine. Med Sci Sports Exerc 2022;54(2):353-68.',
+      url: 'https://pubmed.ncbi.nlm.nih.gov/35029593/',
+      type: 'Posicionamiento oficial de sociedad científica',
+    },
+    SILBERNAGEL_2007: {
+      id: 'SILBERNAGEL_2007',
+      short: 'Silbernagel et al. 2007 (Br J Sports Med)',
+      title: 'Silbernagel KG, Thomeé R, Karlsson J. Full symptomatic recovery does not ensure full recovery of muscle-tendon function in patients with Achilles tendinopathy. Br J Sports Med 2007;41(4):276-80. Modelo de monitoreo del dolor en tendinopatías: dolor ≤5/10 durante el ejercicio que no empeora al día siguiente se considera una carga aceptable para seguir entrenando la zona.',
+      url: 'https://pubmed.ncbi.nlm.nih.gov/17224440/',
+      type: 'Artículo revisado por pares',
+    },
     SCHOENFELD_MEAL: {
       id: 'SCHOENFELD_MEAL',
       short: 'Schoenfeld & Aragon 2018 (JISSN)',
@@ -318,6 +346,13 @@
       { name: 'Elevaciones laterales con mancuerna', type: 'isolation', reps: [10, 15], pattern: 'lateral_raise' },
       { name: 'Elevaciones laterales en polea', type: 'isolation', reps: [12, 15], pattern: 'lateral_raise' },
       { name: 'Face pull / pájaros (deltoides posterior)', type: 'isolation', reps: [12, 15], pattern: 'rear_delt' },
+      // DEC-009: sustituto del press por encima de la cabeza cuando hay
+      // lesión de hombro declarada. `injuryOnly` lo saca de la rotación
+      // normal: sin esa lesión declarada, el catálogo de hombros se
+      // comporta exactamente igual que antes de DEC-009 (mismas 4 opciones,
+      // mismo orden). No es top-set-eligible (DEC-008): un sustituto por
+      // lesión no se carga al máximo por defecto.
+      { name: 'Press landmine o con agarre neutro', type: 'compound', reps: [8, 12], pattern: 'shoulder_press_safe', injuryOnly: 'shoulder' },
     ],
     quads: [
       { name: 'Sentadilla trasera o sentadilla en hack', type: 'compound', reps: [6, 10], pattern: 'squat_bilateral' },
@@ -395,5 +430,23 @@
   // Ejercicios de barra elegibles para dibujar la carga (mismos patrones de DEC-008).
   const BARBELL_PATTERNS = new Set(['squat_bilateral', 'bench_press', 'shoulder_press', 'hinge', 'row_barbell', 'hip_thrust']);
 
-  return { SOURCES, ACTIVITY, DIVISIONS, CLASSIC_WEIGHT_TABLE, EXERCISES, FUNCTIONAL_EXERCISES, MUSCLE_LABELS, SUPPLEMENTS, PLATES_KG, PLATES_LB, PLATE_COLORS, DEFAULT_BAR_WEIGHT, BARBELL_PATTERNS };
+  /* DEC-009 · Capa 3: mapa cerrado de exclusión de ejercicios por zona de
+   * lesión declarada, por id de patrón del catálogo y grupo muscular.
+   * Documentado (con el razonamiento de cada exclusión) en DECISIONS.md. */
+  const INJURY_ZONES = ['shoulder', 'elbow', 'wrist', 'lower_back', 'hip', 'knee', 'ankle'];
+  const INJURY_LABELS = {
+    shoulder: 'Hombro', elbow: 'Codo', wrist: 'Muñeca', lower_back: 'Espalda baja',
+    hip: 'Cadera', knee: 'Rodilla', ankle: 'Tobillo',
+  };
+  const INJURY_EXCLUSIONS = {
+    shoulder: { shoulders: ['shoulder_press'], chest: ['chest_dip_or_machine'], triceps: ['close_grip_press'] },
+    elbow: { biceps: ['curl_barbell'], triceps: ['close_grip_press'] },
+    wrist: { chest: ['bench_press'], back: ['row_barbell'], biceps: ['curl_barbell'] },
+    lower_back: { hamstrings: ['hinge'], back: ['row_barbell'], quads: ['squat_bilateral'] },
+    hip: { quads: ['squat_bilateral', 'split_squat'], glutes: ['split_squat'] },
+    knee: { quads: ['squat_bilateral', 'split_squat', 'knee_extension'] },
+    ankle: { calves: ['calf_raise_standing'], quads: ['split_squat'], glutes: ['split_squat'] },
+  };
+
+  return { SOURCES, ACTIVITY, DIVISIONS, CLASSIC_WEIGHT_TABLE, EXERCISES, FUNCTIONAL_EXERCISES, MUSCLE_LABELS, SUPPLEMENTS, PLATES_KG, PLATES_LB, PLATE_COLORS, DEFAULT_BAR_WEIGHT, BARBELL_PATTERNS, INJURY_ZONES, INJURY_LABELS, INJURY_EXCLUSIONS };
 });
