@@ -20,7 +20,7 @@
   --peligro: #E27B74;
   --aviso: #D9A23B;
   --info-ui: #639ED7;
-  --exito: #4FA868;
+  --exito: #5DAF74;
   --macro-proteina: #4FA868;
   --macro-carbohidrato: #4C8FD1;
   --macro-grasa: #C98A3A;
@@ -236,6 +236,8 @@ li { margin-bottom: .25rem; }
   .sm-set.done { animation: sm-row-dim var(--dur-media) var(--ease-salida) forwards; }
   .sm-set.done .done-btn .check-draw { animation: check-draw var(--dur-media) var(--ease-salida) forwards; }
 }
+/* Sin la animación, el trazo tiene que quedar dibujado igual (no oculto). */
+@media (prefers-reduced-motion: reduce) { .sm-set .done-btn .check-draw { stroke-dashoffset: 0; } }
 @keyframes check-draw { to { stroke-dashoffset: 0; } }
 @keyframes sm-row-dim { from { opacity: 1; } to { opacity: .7; } }
 .sm-set .idx { font-family: var(--font-display); font-size: 1.1rem; color: var(--acero); width: 1.6rem; text-align: center; flex-shrink: 0; }
@@ -301,7 +303,7 @@ li { margin-bottom: .25rem; }
 .record-banner .icon { width: 1.3rem; height: 1.3rem; }
 .record-banner.show { opacity: 1; transform: translate(-50%, 0); }
 @media (prefers-reduced-motion: no-preference) { .record-banner { transition: opacity var(--dur-media) var(--ease-salida), transform var(--dur-media) var(--ease-salida); } }
-@media (prefers-reduced-motion: reduce) { .record-banner { transition: opacity var(--dur-rapida) linear; } }
+@media (prefers-reduced-motion: reduce) { .record-banner { transition: none; } }
 
 .modal-overlay { position: fixed; inset: 0; z-index: 50; background: rgba(35,39,43,.75); display: flex; align-items: center; justify-content: center; padding: 1rem; }
 .modal-card { background: var(--superficie); border-radius: var(--radius); padding: 1.2rem; max-width: 360px; width: 100%; }
