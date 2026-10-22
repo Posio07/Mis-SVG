@@ -85,6 +85,21 @@ const server = http.createServer((req, res) => {
   await page.waitForSelector('#session-mode-root', { state: 'detached' });
   await page.waitForSelector('.subtabs');
 
+  // Fase 5: segunda sesión del mismo ejercicio ya con un "última vez" real
+  // -> la barra cargada debe dibujar discos en vez del aviso "sin historial".
+  await page.click('.session-body:not([hidden]) [data-start-session]');
+  await page.waitForSelector('.session-mode');
+  // Solo logueamos el top set en la sesión anterior, así que el back-off
+  // puede seguir sin historial propio: lo que importa es que el top set
+  // (el que sí tiene "última vez") ya dibuje discos reales.
+  const platebarHtml = await page.innerHTML('.session-mode-body');
+  if (!/platebar-weight/.test(platebarHtml)) throw new Error('la barra cargada no dibujó discos con una "última vez" ya registrada');
+  if (!/<svg class="platebar"/.test(platebarHtml)) throw new Error('no se encontró el SVG de la barra cargada');
+  await shot('09-platebar');
+  page.once('dialog', d => d.accept());
+  await page.click('#sm-close');
+  await page.waitForSelector('#session-mode-root', { state: 'detached' });
+
   // Progreso
   await page.click('.tab[data-tab=progress]');
   const future = new Date(); future.setDate(future.getDate() + 7);

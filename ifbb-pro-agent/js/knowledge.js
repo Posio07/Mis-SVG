@@ -381,5 +381,19 @@
     { name: 'Multivitamínico / vitamina D', dose: 'Según analítica', source: 'HELMS_NUT', note: 'Recomendado en dietas de preparación prolongadas por riesgo de deficiencias. Confirmar con análisis de sangre.' },
   ];
 
-  return { SOURCES, ACTIVITY, DIVISIONS, CLASSIC_WEIGHT_TABLE, EXERCISES, FUNCTIONAL_EXERCISES, MUSCLE_LABELS, SUPPLEMENTS };
+  /* Fase 5: discos olímpicos. El orden (de mayor a menor) define tanto el
+   * reparto al cargar la barra como el color oficial de cada disco; ambas
+   * listas están alineadas índice a índice con PLATE_COLORS. Los colores en
+   * kg son el estándar IWF/competición. En libras no existe un estándar tan
+   * universal: se usa el esquema más difundido en gimnasios (rojo/azul/
+   * amarillo/verde/blanco/gris en el mismo orden), que es una convención
+   * frecuente pero no una norma única. */
+  const PLATES_KG = [25, 20, 15, 10, 5, 2.5, 1.25];
+  const PLATES_LB = [55, 45, 35, 25, 10, 5, 2.5];
+  const PLATE_COLORS = ['var(--disco-rojo)', 'var(--disco-azul)', 'var(--disco-amarillo)', 'var(--disco-verde)', 'var(--disco-blanco)', 'var(--disco-gris)', 'var(--disco-gris)'];
+  const DEFAULT_BAR_WEIGHT = { kg: 20, lb: 45 };
+  // Ejercicios de barra elegibles para dibujar la carga (mismos patrones de DEC-008).
+  const BARBELL_PATTERNS = new Set(['squat_bilateral', 'bench_press', 'shoulder_press', 'hinge', 'row_barbell', 'hip_thrust']);
+
+  return { SOURCES, ACTIVITY, DIVISIONS, CLASSIC_WEIGHT_TABLE, EXERCISES, FUNCTIONAL_EXERCISES, MUSCLE_LABELS, SUPPLEMENTS, PLATES_KG, PLATES_LB, PLATE_COLORS, DEFAULT_BAR_WEIGHT, BARBELL_PATTERNS };
 });

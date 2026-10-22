@@ -640,6 +640,14 @@
       division, goal: ['cut', 'bulk', 'maintain'].includes(src.goal) ? src.goal : 'cut',
       targetDate: src.targetDate || '', targetBf: n(src.targetBf), classicLimitLb: n(src.classicLimitLb),
       laggingMuscles, healthGoal: !!src.healthGoal,
+      // Fase 5: ajustes de la barra cargada. No participan de ningún cálculo
+      // de volumen/calorías/selección de ejercicios, solo de la vista de
+      // discos del modo sesión.
+      plateUnit: src.plateUnit === 'lb' ? 'lb' : 'kg',
+      barWeight: (() => { const w = parseFloat(src.barWeight); return w > 0 ? w : (src.plateUnit === 'lb' ? 45 : 20); })(),
+      availablePlates: Array.isArray(src.availablePlates) && src.availablePlates.length
+        ? src.availablePlates.map(Number).filter(n => n > 0)
+        : (src.plateUnit === 'lb' ? [55, 45, 35, 25, 10, 5, 2.5] : [25, 20, 15, 10, 5, 2.5, 1.25]),
     };
   }
 
