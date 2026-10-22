@@ -31,6 +31,7 @@
   const n1 = v => (Math.round(v * 10) / 10).toLocaleString('es');
   const n0 = v => Math.round(v).toLocaleString('es');
   const n2 = v => (Math.round(v * 100) / 100).toLocaleString('es', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const icon = (name, cls) => `<svg class="icon${cls ? ' ' + cls : ''}" aria-hidden="true"><use href="#icon-${name}"></use></svg>`;
   const fmtDate = iso => { const d = new Date(iso + 'T00:00:00'); return isNaN(d) ? iso : d.toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric' }); };
   const cite = ids => (Array.isArray(ids) ? ids : [ids]).map(id => `<span class="cite" title="${esc(KNOWLEDGE.SOURCES[id] ? KNOWLEDGE.SOURCES[id].short : id)}">${esc(id)}</span>`).join('');
 
@@ -106,7 +107,7 @@
           <input type="file" id="file-import" accept="application/json" hidden>
         </div>
       </div>
-      ${items || '<div class="empty"><div class="big">🏋️</div><p>Aún no hay perfiles.<br>Crea el primero para obtener tu plan.</p></div>'}
+      ${items || `<div class="empty"><div class="big">${icon('person')}</div><p>Aún no hay perfiles.<br>Crea el primero para obtener tu plan.</p></div>`}
       ${active() ? `<div class="card">
         <h3>Perfil activo: ${esc(active().data.name)}</h3>
         <div class="btn-row">
@@ -319,7 +320,7 @@
   /* ---------- Plan ---------- */
   function renderPlan() {
     const p = active();
-    if (!p) { view.innerHTML = '<div class="empty"><div class="big">🎯</div><p>Crea o abre un perfil para ver su plan.</p><button class="btn btn-primary" id="e-new">Nuevo perfil</button></div>'; $('#e-new').onclick = () => go('data'); return; }
+    if (!p) { view.innerHTML = `<div class="empty"><div class="big">${icon('barbell')}</div><p>Crea o abre un perfil para ver su plan.</p><button class="btn btn-primary" id="e-new">Nuevo perfil</button></div>`; $('#e-new').onclick = () => go('data'); return; }
     const plan = ENGINE.buildPlan(p.data, todayIso());
     const tabs = [['summary', 'Resumen'], ['nutrition', 'Dieta'], ['training', 'Entreno'], ['targets', 'Medidas'], ['supps', 'Suplementos']];
     view.innerHTML = `
@@ -770,7 +771,7 @@
           <div class="sm-exmeta">${esc(ex.muscleLabel)} ${sm.short ? `· ~${ex.durationMin} min` : ''}</div>
           ${htmlExerciseImage(ex)}
           ${last ? `<div class="sm-last ${last.sets.some(s => s.setType === 'top') ? 'sm-last-top' : ''}">
-            <b>Última vez</b> (${fmtDate(last.date)}): ${last.sets.map(s => `${s.setType === 'top' ? '🏆 ' : ''}<span class="v">${n1(s.weight)} ${profile.data.plateUnit || 'kg'} × ${s.reps}</span>`).join(' · ')}
+            <b>Última vez</b> (${fmtDate(last.date)}): ${last.sets.map(s => `${s.setType === 'top' ? icon('trophy') + ' ' : ''}<span class="v">${n1(s.weight)} ${profile.data.plateUnit || 'kg'} × ${s.reps}</span>`).join(' · ')}
           </div>` : `<div class="sm-last">Primera vez que registrás este ejercicio.</div>`}
           ${htmlPlateBarsForExercise(profile, ex, last)}
           ${ex.sets.map((st, i) => htmlSmSet(st, i, vals[i], profile.data.plateUnit || 'kg')).join('')}
@@ -787,7 +788,7 @@
   function htmlSmSet(st, i, v, unit) {
     const label = { top: 'Top set', backoff: 'Back-off', normal: `Serie ${st.setNumber}` }[st.setType];
     return `<div class="sm-set ${v.done ? 'done' : ''}" data-set="${i}">
-      <div class="idx">${label === `Serie ${st.setNumber}` ? st.setNumber : (st.setType === 'top' ? '🏆' : '↓')}</div>
+      <div class="idx">${label === `Serie ${st.setNumber}` ? st.setNumber : (st.setType === 'top' ? icon('trophy') : '↓')}</div>
       <div class="fieldwrap"><input type="number" inputmode="decimal" placeholder="${unit}" value="${v.weight || ''}" data-sm-weight="${i}" ${v.done ? 'disabled' : ''}><div class="unit">peso (${unit})</div></div>
       <div class="fieldwrap"><input type="number" inputmode="numeric" placeholder="${st.repsLabel}" value="${v.reps || ''}" data-sm-reps="${i}" ${v.done ? 'disabled' : ''}><div class="unit">reps (obj. ${esc(st.repsLabel)})</div></div>
       <button class="btn ${v.done ? '' : 'btn-primary'} done-btn" data-sm-done="${i}" ${v.done ? 'disabled' : ''}>${v.done ? '✓' : 'Hecha'}</button>
@@ -879,7 +880,7 @@
   /* ---------- Progreso ---------- */
   function renderProgress() {
     const p = active();
-    if (!p) { view.innerHTML = '<div class="empty"><div class="big">📈</div><p>Abre un perfil para registrar su progreso.</p></div>'; return; }
+    if (!p) { view.innerHTML = `<div class="empty"><div class="big">${icon('trend-down')}</div><p>Abre un perfil para registrar su progreso.</p></div>`; return; }
     const plan = ENGINE.buildPlan(p.data, todayIso());
     const log = (p.log || []).slice().sort((a, b) => a.date.localeCompare(b.date));
     const workouts = p.workouts || [];
