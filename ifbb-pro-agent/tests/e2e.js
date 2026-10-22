@@ -63,8 +63,8 @@ const server = http.createServer((req, res) => {
 
   // Modo sesión (Fase 4): abrir el día de hoy, registrar una serie, saltar
   // el descanso, terminar temprano y verificar el resumen + el guardado.
-  await page.waitForSelector('.session-body:not([hidden]) [data-start-session]');
-  await page.click('.session-body:not([hidden]) [data-start-session]');
+  await page.waitForSelector('.session-body:not([inert]) [data-start-session]');
+  await page.click('.session-body:not([inert]) [data-start-session]');
   await page.waitForSelector('.session-mode');
   await shot('06-session-mode');
   await page.fill('[data-sm-weight="0"]', '60');
@@ -87,7 +87,7 @@ const server = http.createServer((req, res) => {
 
   // Fase 5: segunda sesión del mismo ejercicio ya con un "última vez" real
   // -> la barra cargada debe dibujar discos en vez del aviso "sin historial".
-  await page.click('.session-body:not([hidden]) [data-start-session]');
+  await page.click('.session-body:not([inert]) [data-start-session]');
   await page.waitForSelector('.session-mode');
   // Solo logueamos el top set en la sesión anterior, así que el back-off
   // puede seguir sin historial propio: lo que importa es que el top set
@@ -134,12 +134,14 @@ const server = http.createServer((req, res) => {
   await page.click('#btn-dup');
   await page.reload({ waitUntil: 'networkidle' });
   await page.click('.tab[data-tab=profiles]');
+  await page.waitForSelector('.profile-item');
   const items = await page.$$eval('.profile-item', els => els.map(e => e.querySelector('.name').textContent));
   if (items.length !== 3) throw new Error('expected 3 profiles, got ' + items.join(','));
   await shot('06-profiles');
 
   // Fuentes
   await page.click('.tab[data-tab=sources]');
+  await page.waitForSelector('.source-item');
   const srcCount = await page.$$eval('.source-item', e => e.length);
   if (srcCount < 15) throw new Error('sources missing');
   await shot('07-sources');

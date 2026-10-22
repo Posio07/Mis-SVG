@@ -32,6 +32,33 @@
   const n0 = v => Math.round(v).toLocaleString('es');
   const n2 = v => (Math.round(v * 100) / 100).toLocaleString('es', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const icon = (name, cls) => `<svg class="icon${cls ? ' ' + cls : ''}" aria-hidden="true"><use href="#icon-${name}"></use></svg>`;
+
+  /* Conteo animado de las métricas grandes del Resumen: solo la primera
+   * vez que se visitan en esta sesión de la pestaña (ui.countedOnce);
+   * en visitas siguientes, o con prefers-reduced-motion, el número
+   * aparece directo en su valor final. */
+  ui.countedOnce = ui.countedOnce || new Set();
+  const statCount = (value, decimals, suffix) => `<span class="count-num" data-target="${value}" data-decimals="${decimals || 0}">0</span>${suffix ? esc(suffix) : ''}`;
+  function wireCounts(container, key) {
+    const nodes = container.querySelectorAll('.count-num');
+    const already = ui.countedOnce.has(key);
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    nodes.forEach(el => {
+      const target = parseFloat(el.dataset.target) || 0;
+      const decimals = Number(el.dataset.decimals) || 0;
+      const fmt = v => decimals ? v.toFixed(decimals).replace('.', ',') : Math.round(v).toLocaleString('es');
+      if (already || reduced) { el.textContent = fmt(target); return; }
+      const start = performance.now(), dur = 600;
+      const tick = now => {
+        const p = Math.min(1, (now - start) / dur);
+        const eased = 1 - Math.pow(1 - p, 3);
+        el.textContent = fmt(target * eased);
+        if (p < 1) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    ui.countedOnce.add(key);
+  }
   const fmtDate = iso => { const d = new Date(iso + 'T00:00:00'); return isNaN(d) ? iso : d.toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric' }); };
   const cite = ids => (Array.isArray(ids) ? ids : [ids]).map(id => `<span class="cite" title="${esc(KNOWLEDGE.SOURCES[id] ? KNOWLEDGE.SOURCES[id].short : id)}">${esc(id)}</span>`).join('');
 
@@ -63,12 +90,20 @@
   }
 
   /* ---------- Navegación ---------- */
+  const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => go(b.dataset.tab)));
   function go(tab) {
     ui.tab = tab;
-    document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
-    render();
-    window.scrollTo({ top: 0 });
+    const apply = () => {
+      document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+      render();
+      window.scrollTo({ top: 0 });
+    };
+    // Fundido corto entre pestañas con la View Transitions API; si el
+    // navegador no la soporta (o el usuario pide menos movimiento), el
+    // cambio es instantáneo, sin fallback animado propio.
+    if (document.startViewTransition && !prefersReducedMotion()) document.startViewTransition(apply);
+    else apply();
   }
 
   function render() {
@@ -328,7 +363,7 @@
       <div id="plan-body"></div>`;
     view.querySelectorAll('[data-pt]').forEach(b => b.onclick = () => { ui.planTab = b.dataset.pt; renderPlan(); });
     const body = $('#plan-body');
-    if (ui.planTab === 'summary') body.innerHTML = htmlSummary(plan, p);
+    if (ui.planTab === 'summary') { body.innerHTML = htmlSummary(plan, p); wireCounts(body, 'summary:' + p.id); }
     else if (ui.planTab === 'nutrition') body.innerHTML = htmlNutrition(plan);
     else if (ui.planTab === 'training') body.innerHTML = htmlTraining(plan);
     else if (ui.planTab === 'targets') body.innerHTML = htmlTargets(plan);
@@ -344,7 +379,7 @@
         const bodyEl = document.getElementById('day-body-' + btn.dataset.toggleDay);
         const isOpen = btn.getAttribute('aria-expanded') === 'true';
         btn.setAttribute('aria-expanded', String(!isOpen));
-        if (bodyEl) bodyEl.hidden = isOpen;
+        if (bodyEl) bodyEl.inert = isOpen;
       };
     });
     view.querySelectorAll('[data-start-session]').forEach(btn => {
@@ -366,14 +401,14 @@
         <p class="muted">${esc(t.division.label)} · ${goalLabel} · generado ${fmtDate(plan.generatedAt)}</p>
         ${alerts(plan.warnings)}
         <div class="grid">
-          <div class="stat"><div class="v">${n0(n.calories)}</div><div class="l">kcal/día (${esc(n.deltaLabel)})</div></div>
-          <div class="stat"><div class="v">${n.protein} g</div><div class="l">proteína</div></div>
-          <div class="stat"><div class="v">${n.carbs} g</div><div class="l">carbohidratos</div></div>
-          <div class="stat"><div class="v">${n.fat} g</div><div class="l">grasas</div></div>
-          <div class="stat"><div class="v">${n1(m.bodyFat)} %</div><div class="l">grasa actual</div><div class="s">${esc(m.bfMethod)}</div></div>
-          <div class="stat"><div class="v">${n1(t.targetBf)} %</div><div class="l">grasa objetivo</div></div>
-          <div class="stat"><div class="v">${n1(t.targetWeight)} kg</div><div class="l">peso objetivo</div><div class="s">${t.delta >= 0 ? '+' : ''}${n1(t.delta)} kg</div></div>
-          <div class="stat"><div class="v">${plan.input.goal === 'maintain' ? '—' : n0(t.weeksNeeded) + ' sem'}</div><div class="l">duración estimada</div><div class="s">${plan.input.goal === 'maintain' ? '' : 'hasta ' + fmtDate(t.estimatedDate)}</div></div>
+          <div class="stat"><div class="v">${statCount(n.calories, 0)}</div><div class="l">kcal/día (${esc(n.deltaLabel)})</div></div>
+          <div class="stat"><div class="v">${statCount(n.protein, 0, ' g')}</div><div class="l">proteína</div></div>
+          <div class="stat"><div class="v">${statCount(n.carbs, 0, ' g')}</div><div class="l">carbohidratos</div></div>
+          <div class="stat"><div class="v">${statCount(n.fat, 0, ' g')}</div><div class="l">grasas</div></div>
+          <div class="stat"><div class="v">${statCount(m.bodyFat, 1, ' %')}</div><div class="l">grasa actual</div><div class="s">${esc(m.bfMethod)}</div></div>
+          <div class="stat"><div class="v">${statCount(t.targetBf, 1, ' %')}</div><div class="l">grasa objetivo</div></div>
+          <div class="stat"><div class="v">${statCount(t.targetWeight, 1, ' kg')}</div><div class="l">peso objetivo</div><div class="s">${t.delta >= 0 ? '+' : ''}${n1(t.delta)} kg</div></div>
+          <div class="stat"><div class="v">${plan.input.goal === 'maintain' ? '—' : statCount(t.weeksNeeded, 0, ' sem')}</div><div class="l">duración estimada</div><div class="s">${plan.input.goal === 'maintain' ? '' : 'hasta ' + fmtDate(t.estimatedDate)}</div></div>
         </div>
       </div>
       <div class="card">
@@ -538,11 +573,13 @@
         </div>
         ${icon('chevron', 'chev')}
       </button>
-      <div class="session-body" id="day-body-${i}" ${open ? '' : 'hidden'}>
-        <div class="ex-list">${s.exercises.map(htmlExercise).join('')}</div>
-        <div class="btn-row" style="margin-top:.6rem">
-          <button class="btn btn-primary btn-lg" data-start-session="${i}" style="flex:2">Empezar sesión</button>
-          <button class="btn" data-start-session-short="${i}" style="flex:1">Versión corta</button>
+      <div class="session-body" id="day-body-${i}" ${open ? '' : 'inert'}>
+        <div class="session-body-inner">
+          <div class="ex-list">${s.exercises.map(htmlExercise).join('')}</div>
+          <div class="btn-row" style="margin-top:.6rem">
+            <button class="btn btn-primary btn-lg" data-start-session="${i}" style="flex:2">Empezar sesión</button>
+            <button class="btn" data-start-session-short="${i}" style="flex:1">Versión corta</button>
+          </div>
         </div>
       </div>
     </div>`;
@@ -651,11 +688,12 @@
     const colorFor = w => { const idx = canon.findIndex(p => Math.abs(p - w) < 1e-6); return KNOWLEDGE.PLATE_COLORS[idx === -1 ? canon.length - 1 : idx]; };
     const heightFor = w => Math.min(64, 24 + w * (unit === 'lb' ? 0.55 : 1.2));
     const widthFor = w => (unit === 'lb' ? w >= 35 : w >= 10) ? 11 : 7;
-    let x = 96; // arranca pegado al manguito, hacia afuera
+    let x = 96, i = 0; // arranca pegado al manguito, hacia afuera
     const rects = result.plates.map(w => {
       const h = heightFor(w), wd = widthFor(w);
-      const svg = `<rect x="${x}" y="${(100 - h) / 2}" width="${wd}" height="${h}" rx="2" fill="${colorFor(w)}" stroke="#1a1d20" stroke-width="1"></rect><rect x="${292 - x - wd}" y="${(100 - h) / 2}" width="${wd}" height="${h}" rx="2" fill="${colorFor(w)}" stroke="#1a1d20" stroke-width="1"></rect>`;
-      x += wd + 1.5;
+      const delay = `style="animation-delay:${i * 40}ms"`;
+      const svg = `<rect class="plate-rect plate-rect-l" ${delay} x="${x}" y="${(100 - h) / 2}" width="${wd}" height="${h}" rx="2" fill="${colorFor(w)}" stroke="#1a1d20" stroke-width="1"></rect><rect class="plate-rect plate-rect-r" ${delay} x="${292 - x - wd}" y="${(100 - h) / 2}" width="${wd}" height="${h}" rx="2" fill="${colorFor(w)}" stroke="#1a1d20" stroke-width="1"></rect>`;
+      x += wd + 1.5; i++;
       return svg;
     }).join('');
     return `<svg class="platebar" viewBox="0 0 292 100" width="100%" height="64" role="img" aria-label="Carga de la barra">
@@ -812,7 +850,7 @@
       <div class="idx">${label === `Serie ${st.setNumber}` ? st.setNumber : (st.setType === 'top' ? icon('trophy') : '↓')}</div>
       <div class="fieldwrap"><input type="number" inputmode="decimal" placeholder="${unit}" value="${v.weight || ''}" data-sm-weight="${i}" ${v.done ? 'disabled' : ''}><div class="unit">peso (${unit})</div></div>
       <div class="fieldwrap"><input type="number" inputmode="numeric" placeholder="${st.repsLabel}" value="${v.reps || ''}" data-sm-reps="${i}" ${v.done ? 'disabled' : ''}><div class="unit">reps (obj. ${esc(st.repsLabel)})</div></div>
-      <button class="btn ${v.done ? '' : 'btn-primary'} done-btn" data-sm-done="${i}" ${v.done ? 'disabled' : ''}>${v.done ? '✓' : 'Hecha'}</button>
+      <button class="btn ${v.done ? '' : 'btn-primary'} done-btn" data-sm-done="${i}" ${v.done ? 'disabled' : ''}>${v.done ? icon('check', 'check-draw') : 'Hecha'}</button>
     </div>`;
   }
 
@@ -850,22 +888,44 @@
     startRestTimer(st.restLabel);
   }
 
+  const TIMER_RING_R = 52;
+  const TIMER_RING_C = 2 * Math.PI * TIMER_RING_R;
+
   function startRestTimer(restLabel) {
     const total = parseRestSeconds(restLabel);
-    smTimerState = { remaining: total };
+    smTimerState = { remaining: total, total };
     const root = document.getElementById('session-mode-root');
     closeTimer();
     const ov = document.createElement('div'); ov.className = 'timer-overlay'; ov.id = 'sm-timer';
-    ov.innerHTML = `<div class="timer-label">Descanso</div><div class="timer-num" id="sm-timer-num">${fmtTimer(total)}</div>
+    ov.innerHTML = `<div class="timer-label">Descanso</div>
+      <div class="timer-ring-wrap" id="sm-timer-ring-wrap">
+        <svg class="timer-ring" viewBox="0 0 120 120" aria-hidden="true">
+          <circle class="ring-bg" cx="60" cy="60" r="${TIMER_RING_R}"></circle>
+          <circle class="ring-fg" id="sm-timer-ring-fg" cx="60" cy="60" r="${TIMER_RING_R}" stroke-dasharray="${TIMER_RING_C.toFixed(1)}" stroke-dashoffset="0"></circle>
+        </svg>
+        <div class="timer-num-wrap"><div class="timer-num" id="sm-timer-num">${fmtTimer(total)}</div></div>
+      </div>
       <div class="timer-actions"><button class="btn btn-lg" id="sm-timer-plus30">+30 s</button><button class="btn btn-primary btn-lg" id="sm-timer-skip">Saltar</button></div>`;
     root.appendChild(ov);
-    $('#sm-timer-plus30').onclick = () => { smTimerState.remaining += 30; };
+    const updateTimerUi = () => {
+      const r = Math.max(0, smTimerState.remaining);
+      const numEl = document.getElementById('sm-timer-num'); if (numEl) numEl.textContent = fmtTimer(r);
+      const fg = document.getElementById('sm-timer-ring-fg');
+      if (fg) fg.style.strokeDashoffset = (TIMER_RING_C * (1 - Math.min(1, r / smTimerState.total))).toFixed(1);
+      const ring = ov.querySelector('.timer-ring'); if (ring) ring.classList.toggle('urgent', r <= 10 && r > 0);
+    };
+    updateTimerUi();
+    $('#sm-timer-plus30').onclick = () => { smTimerState.remaining += 30; updateTimerUi(); };
     $('#sm-timer-skip').onclick = () => closeTimer();
     smTimerInterval = setInterval(() => {
       smTimerState.remaining -= 1;
-      const numEl = document.getElementById('sm-timer-num');
-      if (numEl) numEl.textContent = fmtTimer(Math.max(0, smTimerState.remaining));
-      if (smTimerState.remaining <= 0) { if (navigator.vibrate) navigator.vibrate([200, 100, 200]); closeTimer(); }
+      updateTimerUi();
+      if (smTimerState.remaining <= 0) {
+        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+        clearInterval(smTimerInterval); smTimerInterval = null;
+        const wrap = document.getElementById('sm-timer-ring-wrap');
+        if (wrap) { wrap.classList.add('pulse'); setTimeout(closeTimer, 500); } else closeTimer();
+      }
     }, 1000);
   }
   function closeTimer() {
@@ -1018,7 +1078,7 @@
       <line class="axis" x1="${L}" y1="${T}" x2="${L}" y2="${H - B}"/><line class="axis" x1="${L}" y1="${H - B}" x2="${W - R}" y2="${H - B}"/>
       <line class="target" x1="${L}" y1="${Y(target)}" x2="${W - R}" y2="${Y(target)}"/>
       ${projection}
-      ${ticks}<path class="line" d="${mainPath}"/>${dotsHtml}
+      ${ticks}<path class="line" pathLength="100" d="${mainPath}"/>${dotsHtml}
       <text x="${L}" y="${H - 6}">${fmtDate(log[0].date)}</text><text x="${W - R}" y="${H - 6}" text-anchor="end">${fmtDate(log[log.length - 1].date)}</text>
     </svg>`;
   }
@@ -1055,7 +1115,7 @@
     const ticks = [yMin + 1, (yMin + yMax) / 2, yMax - 1].map(v => `<text x="${L - 4}" y="${Y(v) + 3}" text-anchor="end">${n1(v)}</text>`).join('');
     return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Evolución del top set">
       <line class="axis" x1="${L}" y1="${T}" x2="${L}" y2="${H - B}"/><line class="axis" x1="${L}" y1="${H - B}" x2="${W - R}" y2="${H - B}"/>
-      ${ticks}<path class="line" d="${path}"/>${dots}
+      ${ticks}<path class="line" pathLength="100" d="${path}"/>${dots}
       <text x="${L}" y="${H - 6}">${fmtDate(points[0].date)}</text><text x="${W - R}" y="${H - 6}" text-anchor="end">${fmtDate(points[points.length - 1].date)}</text>
     </svg>`;
   }

@@ -28,8 +28,13 @@
   --tabbar-h: 64px;
   --font-display: 'Big Shoulders Display', system-ui, -apple-system, sans-serif;
   --font-body: 'Source Sans 3', system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --dur-rapida: 150ms;
+  --dur-media: 250ms;
+  --dur-lenta: 600ms;
+  --ease-salida: cubic-bezier(.2,.8,.2,1);
 }
 * { box-sizing: border-box; }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: var(--dur-rapida); }
 html, body { margin: 0; padding: 0; background: var(--grafito); color: var(--tiza); font: 16px/1.45 var(--font-body); -webkit-text-size-adjust: 100%; }
 body { padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom)); min-height: 100vh; }
 h1, h2, h3, h4 { margin: 0 0 .4em; line-height: 1.2; font-weight: 700; }
@@ -59,7 +64,7 @@ hr { border: 0; border-top: 1px solid var(--borde); margin: 1rem 0; }
 .tab.active { color: var(--disco-amarillo); }
 .tab::before { content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 28px; height: 3px; border-radius: 0 0 3px 3px; background: transparent; }
 .tab.active::before { background: var(--disco-amarillo); }
-@media (prefers-reduced-motion: no-preference) { .tab::before { transition: background-color 150ms ease; } }
+@media (prefers-reduced-motion: no-preference) { .tab::before { transition: background-color var(--dur-rapida) ease; } }
 
 .card { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radius); padding: 1rem; margin-bottom: 1rem; }
 .card.accent { border-color: var(--disco-amarillo); }
@@ -137,9 +142,18 @@ td.num { text-align: right; white-space: nowrap; }
 .session-muscles .chip { font-size: .7rem; padding: .15rem .55rem; border-radius: 999px; background: var(--superficie); border: 1px solid var(--acero); color: var(--acero); }
 .session-head .chev { color: var(--acero); flex-shrink: 0; width: 20px; height: 20px; margin-top: .1rem; }
 .session-head[aria-expanded="true"] .chev { transform: rotate(180deg); }
-@media (prefers-reduced-motion: no-preference) { .session-head .chev { transition: transform .15s ease; } }
-.session-body { padding: 0 .9rem .9rem; }
-.session-body[hidden] { display: none; }
+@media (prefers-reduced-motion: no-preference) { .session-head .chev { transition: transform var(--dur-rapida) ease; } }
+/* Apertura/cierre de día animado con la técnica grid-rows 0fr->1fr (altura
+ * auto animable sin medir en JS) + opacidad. El contenido vive en un div
+ * interno con overflow:hidden; el de afuera es el que cambia de fila.
+ * El estado interactivo (foco/tab) se controla con `inert`, no con
+ * `hidden`, para poder animar el colapso en vez de cortarlo de golpe. */
+.session-body { display: grid; grid-template-rows: 0fr; opacity: 0; }
+.session-body > .session-body-inner { overflow: hidden; min-height: 0; padding: 0 .9rem .9rem; }
+.session-head[aria-expanded="true"] + .session-body { grid-template-rows: 1fr; opacity: 1; }
+@media (prefers-reduced-motion: no-preference) {
+  .session-body { transition: grid-template-rows var(--dur-media) var(--ease-salida), opacity var(--dur-media) var(--ease-salida); }
+}
 
 /* Filas con separador fino sobre una única superficie compartida (en vez
  * de una tarjeta propia por ejercicio): más compacto, misma barra de
@@ -179,7 +193,14 @@ td.num { text-align: right; white-space: nowrap; }
 
 .chart { width: 100%; height: 160px; display: block; }
 .chart .axis { stroke: var(--borde); }
-.chart .line { fill: none; stroke: var(--exito); stroke-width: 2; }
+/* pathLength="100" normaliza el largo del trazo a 100 unidades sin
+ * importar cuánto mida la curva real, para poder animarlo con un
+ * dasharray/dashoffset fijo. Se dibuja una sola vez al entrar (es una
+ * animation, no una transition: corre siempre que el path se inserta). */
+.chart .line { fill: none; stroke: var(--exito); stroke-width: 2; stroke-dasharray: 100; stroke-dashoffset: 100; }
+@media (prefers-reduced-motion: no-preference) { .chart .line { animation: chart-draw var(--dur-lenta) var(--ease-salida) forwards; } }
+@media (prefers-reduced-motion: reduce) { .chart .line { stroke-dashoffset: 0; } }
+@keyframes chart-draw { to { stroke-dashoffset: 0; } }
 .chart .line2 { fill: none; stroke: var(--acero); stroke-width: 1.5; stroke-dasharray: 4 3; }
 .chart .dot { fill: var(--exito); }
 .chart .dot-faint { fill: var(--acero); opacity: .5; }
@@ -209,7 +230,14 @@ li { margin-bottom: .25rem; }
 .sm-last .v { color: var(--tiza); font-weight: 600; }
 
 .sm-set { display: flex; align-items: center; gap: .6rem; background: var(--superficie); border: 1px solid var(--borde); border-radius: 12px; padding: .6rem .7rem; margin-bottom: .6rem; }
-.sm-set.done { border-color: var(--exito); }
+.sm-set.done { border-color: var(--exito); opacity: .7; }
+.sm-set .done-btn .check-draw { width: 1.3rem; height: 1.3rem; stroke-dasharray: 24; stroke-dashoffset: 24; }
+@media (prefers-reduced-motion: no-preference) {
+  .sm-set.done { animation: sm-row-dim var(--dur-media) var(--ease-salida) forwards; }
+  .sm-set.done .done-btn .check-draw { animation: check-draw var(--dur-media) var(--ease-salida) forwards; }
+}
+@keyframes check-draw { to { stroke-dashoffset: 0; } }
+@keyframes sm-row-dim { from { opacity: 1; } to { opacity: .7; } }
 .sm-set .idx { font-family: var(--font-display); font-size: 1.1rem; color: var(--acero); width: 1.6rem; text-align: center; flex-shrink: 0; }
 .sm-set input { text-align: center; font-family: var(--font-display); font-size: 1.2rem; min-height: 48px; }
 .sm-set .unit { font-size: .75rem; color: var(--acero); text-align: center; margin-top: .15rem; }
@@ -220,10 +248,25 @@ li { margin-bottom: .25rem; }
 .sm-nav .btn { min-height: 56px; font-size: 1.3rem; }
 
 .timer-overlay { position: fixed; inset: 0; z-index: 40; background: rgba(35,39,43,.92); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem; padding: 1rem; }
-.timer-num { font-family: var(--font-display); font-size: 4.5rem; font-weight: 600; color: var(--tiza); font-variant-numeric: tabular-nums; }
+.timer-num { font-family: var(--font-display); font-size: 2.6rem; font-weight: 600; color: var(--tiza); font-variant-numeric: tabular-nums; }
 .timer-label { color: var(--acero); font-size: .9rem; }
 .timer-actions { display: flex; gap: .7rem; }
 .timer-actions .btn { min-height: 56px; min-width: 88px; }
+
+/* Anillo de descanso: se vacía a medida que pasa el tiempo (el trazo
+ * visible encoge con stroke-dashoffset). Últimos 10s: --disco-amarillo.
+ * Al llegar a 0: pulso breve + vibración (en JS). */
+.timer-ring-wrap { position: relative; width: 180px; height: 180px; }
+.timer-ring { width: 100%; height: 100%; transform: rotate(-90deg); }
+.timer-ring .ring-bg { fill: none; stroke: var(--superficie-2); stroke-width: 8; }
+.timer-ring .ring-fg { fill: none; stroke: var(--disco-azul); stroke-width: 8; stroke-linecap: round; }
+.timer-ring.urgent .ring-fg { stroke: var(--disco-amarillo); }
+@media (prefers-reduced-motion: no-preference) {
+  .timer-ring .ring-fg { transition: stroke-dashoffset 1s linear, stroke var(--dur-media) ease; }
+  .timer-ring-wrap.pulse { animation: timer-pulse var(--dur-media) var(--ease-salida); }
+}
+@keyframes timer-pulse { 0% { transform: scale(1); } 45% { transform: scale(1.1); } 100% { transform: scale(1); } }
+.timer-num-wrap { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
 
 .sm-image-wrap { position: relative; width: 140px; height: 140px; margin: 0 auto .8rem; border-radius: var(--radius); overflow: hidden; background: var(--superficie-2); }
 .sm-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
@@ -240,6 +283,15 @@ li { margin-bottom: .25rem; }
 .platebar-wrap { text-align: center; margin: .8rem 0; }
 .platebar-weight { font-family: var(--font-display); font-size: 1.4rem; margin-bottom: .3rem; }
 .platebar-note { font-size: .75rem; color: var(--acero); }
+/* Los discos se cargan uno a la vez, de adentro hacia afuera (como en la
+ * vida real), con un pequeño desfase entre ellos. */
+.plate-rect { transform-box: fill-box; transform-origin: center; }
+@media (prefers-reduced-motion: no-preference) {
+  .plate-rect-l { animation: plate-slide-l var(--dur-media) var(--ease-salida) backwards; }
+  .plate-rect-r { animation: plate-slide-r var(--dur-media) var(--ease-salida) backwards; }
+}
+@keyframes plate-slide-l { from { transform: translateX(-14px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+@keyframes plate-slide-r { from { transform: translateX(14px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 
 .modal-overlay { position: fixed; inset: 0; z-index: 50; background: rgba(35,39,43,.75); display: flex; align-items: center; justify-content: center; padding: 1rem; }
 .modal-card { background: var(--superficie); border-radius: var(--radius); padding: 1.2rem; max-width: 360px; width: 100%; }
@@ -248,7 +300,3 @@ li { margin-bottom: .25rem; }
 
 .chart .dot-short { fill: none; stroke: var(--disco-amarillo); stroke-width: 2; }
 
-@media (prefers-reduced-motion: no-preference) {
-  .session-body { transition: grid-template-rows .18s ease; }
-  .ex-row { transition: transform .12s ease; }
-}
