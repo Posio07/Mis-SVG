@@ -487,9 +487,9 @@
       <div class="ex-main">
         <div class="ex-name">${esc(label != null ? label : e.name)}${showTag ? ' <span class="ex-tag">Top set</span>' : ''}</div>
         <div class="ex-fields">
-          <span class="f">Grupo <b>${esc(e.muscleLabel)}</b></span>
-          <span class="f">RIR <b>${esc(showTag ? e.topSet.rir : e.rir)}</b></span>
-          <span class="f">Descanso <b>${esc(showTag ? '3 min' : e.rest)}</b></span>
+          <span class="f">${esc(e.muscleLabel)}</span>
+          <span class="f">${icon('gauge')} RIR ${esc(showTag ? e.topSet.rir : e.rir)}</span>
+          <span class="f">${icon('clock')} ${esc(showTag ? '3 min' : e.rest)}</span>
         </div>
       </div>
       <div class="ex-sets">${esc(setsLabel)} × ${esc(reps)}</div>
@@ -539,7 +539,7 @@
         ${icon('chevron', 'chev')}
       </button>
       <div class="session-body" id="day-body-${i}" ${open ? '' : 'hidden'}>
-        ${s.exercises.map(htmlExercise).join('')}
+        <div class="ex-list">${s.exercises.map(htmlExercise).join('')}</div>
         <div class="btn-row" style="margin-top:.6rem">
           <button class="btn btn-primary btn-lg" data-start-session="${i}" style="flex:2">Empezar sesión</button>
           <button class="btn" data-start-session-short="${i}" style="flex:1">Versión corta</button>

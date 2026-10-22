@@ -141,18 +141,24 @@ td.num { text-align: right; white-space: nowrap; }
 .session-body { padding: 0 .9rem .9rem; }
 .session-body[hidden] { display: none; }
 
-.ex-row { display: flex; border-left: 4px solid var(--borde); border-radius: 8px; margin-bottom: .4rem; background: var(--superficie-2); overflow: hidden; }
+/* Filas con separador fino sobre una única superficie compartida (en vez
+ * de una tarjeta propia por ejercicio): más compacto, misma barra de
+ * color a la izquierda por tipo de serie. */
+.ex-list { background: var(--superficie-2); border-radius: 10px; margin-top: .6rem; overflow: hidden; }
+.ex-row { display: flex; border-left: 4px solid var(--borde); border-bottom: 1px solid var(--borde); }
+.ex-list .ex-group:last-child .ex-row:last-child { border-bottom: 0; }
 .ex-row.type-top { border-left-color: var(--disco-rojo); }
 .ex-row.type-compound { border-left-color: var(--disco-azul); }
 .ex-row.type-isolation { border-left-color: var(--disco-verde); }
-.ex-row .ex-main { flex: 1; padding: .55rem .7rem; min-width: 0; }
+.ex-row .ex-main { flex: 1; padding: .4rem .7rem; min-width: 0; }
 .ex-row .ex-name { font-weight: 600; font-size: .95rem; }
 .ex-row .ex-tag { display: inline-block; font-size: .68rem; padding: .05rem .4rem; border-radius: 6px; margin-left: .4rem; vertical-align: middle; background: var(--disco-rojo); color: #fff; font-weight: 700; }
-.ex-row .ex-fields { display: flex; gap: .9rem; margin-top: .3rem; font-size: .75rem; color: var(--acero); flex-wrap: wrap; }
-.ex-row .ex-fields .f b { color: var(--tiza); font-weight: 600; }
-.ex-row .ex-sets { font-family: var(--font-display); font-size: 1.5rem; font-weight: 600; padding: .55rem .8rem; display: flex; align-items: center; white-space: nowrap; }
-.ex-group { margin-bottom: .4rem; }
-.ex-group .backoff { margin-top: .35rem; margin-left: .9rem; }
+.ex-row .ex-fields { display: flex; gap: .9rem; margin-top: .25rem; font-size: .75rem; color: var(--acero); flex-wrap: wrap; }
+.ex-row .ex-fields .f { display: inline-flex; align-items: center; gap: .25rem; }
+.ex-row .ex-fields .icon { width: .85rem; height: .85rem; }
+.ex-row .ex-sets { font-family: var(--font-display); font-size: 1.5rem; font-weight: 600; padding: .4rem .8rem; display: flex; align-items: center; white-space: nowrap; }
+.ex-group .backoff { margin-left: .9rem; }
+.ex-group .backoff .ex-row { border-left-width: 3px; }
 .ex-group .backoff .ex-sets { font-size: 1.15rem; }
 
 
