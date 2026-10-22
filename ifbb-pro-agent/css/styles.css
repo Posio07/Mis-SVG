@@ -118,10 +118,24 @@ td.num { text-align: right; white-space: nowrap; }
 /* Sesiones de entreno: la barra de color a la izquierda identifica el
  * tipo de ejercicio (rojo top set, azul multiarticular, verde aislamiento). */
 .session { border: 1px solid var(--borde); border-radius: 12px; margin-bottom: .7rem; background: var(--superficie); overflow: hidden; }
-.session-head { display: flex; justify-content: space-between; align-items: center; gap: .6rem; padding: .8rem .9rem; cursor: pointer; background: none; border: 0; width: 100%; text-align: left; color: var(--tiza); min-height: 44px; font-family: var(--font-body); }
-.session-head h4 { font-family: var(--font-display); font-size: 1.15rem; margin: 0; font-weight: 600; }
-.session-head .meta { font-size: .78rem; color: var(--acero); margin-top: .1rem; }
-.session-head .chev { color: var(--acero); flex-shrink: 0; }
+.session-head { display: flex; justify-content: space-between; align-items: flex-start; gap: .6rem; padding: .8rem .9rem; cursor: pointer; background: none; border: 0; width: 100%; text-align: left; color: var(--tiza); min-height: 44px; font-family: var(--font-body); }
+/* El mismo inset que el texto de .ex-row (borde de 4px + padding de .7rem
+ * de .ex-main), para que título, métricas y ejercicios compartan margen. */
+.session-head-main { flex: 1; min-width: 0; padding-left: calc(4px + .7rem); }
+.session-head h4 { font-family: var(--font-display); font-size: 1.15rem; margin: 0; font-weight: 600; display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.day-tag { font-family: var(--font-body); font-size: .68rem; font-weight: 700; border: 1.5px solid var(--disco-amarillo); color: var(--disco-amarillo); border-radius: 999px; padding: .05rem .55rem; }
+.session-metrics { display: flex; gap: 1.1rem; margin-top: .35rem; align-items: baseline; }
+.session-metrics .metric { font-size: .78rem; color: var(--acero); display: inline-flex; align-items: center; gap: .3rem; }
+.session-metrics .metric b { font-family: var(--font-display); font-size: 1.3rem; color: var(--tiza); font-weight: 600; }
+.session-metrics .metric .icon { width: 1rem; height: 1rem; }
+.session-bar { display: flex; height: 5px; border-radius: 3px; overflow: hidden; margin-top: .55rem; background: var(--superficie-2); }
+.session-bar span { height: 100%; }
+.session-bar .top { background: var(--disco-rojo); }
+.session-bar .compound { background: var(--disco-azul); }
+.session-bar .isolation { background: var(--disco-verde); }
+.session-muscles { display: flex; gap: .35rem; flex-wrap: wrap; margin-top: .55rem; }
+.session-muscles .chip { font-size: .7rem; padding: .15rem .55rem; border-radius: 999px; background: var(--superficie); border: 1px solid var(--acero); color: var(--acero); }
+.session-head .chev { color: var(--acero); flex-shrink: 0; width: 20px; height: 20px; margin-top: .1rem; }
 .session-head[aria-expanded="true"] .chev { transform: rotate(180deg); }
 @media (prefers-reduced-motion: no-preference) { .session-head .chev { transition: transform .15s ease; } }
 .session-body { padding: 0 .9rem .9rem; }
@@ -141,14 +155,6 @@ td.num { text-align: right; white-space: nowrap; }
 .ex-group .backoff { margin-top: .35rem; margin-left: .9rem; }
 .ex-group .backoff .ex-sets { font-size: 1.15rem; }
 
-/* Compatibilidad transitoria con el marcado anterior (se retira en Fase 3). */
-.session h4 { display: flex; justify-content: space-between; margin: 0; padding: .8rem .9rem; font-family: var(--font-display); font-weight: 600; }
-.session h4 small { font-weight: 400; font-family: var(--font-body); color: var(--acero); }
-.ex { display: grid; grid-template-columns: 1fr auto; gap: .2rem .6rem; padding: .35rem .9rem; border-top: 1px dashed var(--borde); font-size: .9rem; }
-.ex .n { font-weight: 500; }
-.ex .m { font-size: .75rem; color: var(--acero); }
-.ex .s { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.ex .s small { display: block; color: var(--acero); }
 
 .src { font-size: .78rem; color: var(--acero); margin-top: .5rem; }
 .src b { color: var(--tiza); }

@@ -509,13 +509,34 @@
 
   function htmlSessionCard(s, i, isToday) {
     const open = isToday;
+    // Composición del día por tipo de serie: el top set de cada ejercicio
+    // con top set cuenta como 1 (rojo); el resto de sus series (back-off)
+    // y las series de los ejercicios sin top set cuentan como azul
+    // (multiarticular) o verde (aislamiento) según el tipo del ejercicio.
+    const counts = { top: 0, compound: 0, isolation: 0 };
+    s.exercises.forEach(e => {
+      const rest = e.topSet ? e.sets - 1 : e.sets;
+      if (e.topSet) counts.top += 1;
+      counts[e.type === 'compound' ? 'compound' : 'isolation'] += rest;
+    });
+    const pct = n => s.totalSets ? (n / s.totalSets * 100) : 0;
+    const muscles = [...new Set(s.exercises.map(e => e.muscleLabel))];
     return `<div class="session">
       <button type="button" class="session-head" data-toggle-day="${i}" aria-expanded="${open}" aria-controls="day-body-${i}">
-        <div>
-          <h4>${esc(s.name)}${isToday ? ' <span class="cite">hoy</span>' : ''}</h4>
-          <div class="meta">${s.totalSets} series · ~${s.durationMin} min</div>
+        <div class="session-head-main">
+          <h4>${esc(s.name)}${isToday ? ' <span class="day-tag">hoy</span>' : ''}</h4>
+          <div class="session-metrics">
+            <span class="metric"><b>${s.totalSets}</b> series</span>
+            <span class="metric">${icon('clock')} ~${s.durationMin} min</span>
+          </div>
+          <div class="session-bar" aria-hidden="true">
+            <span class="top" style="width:${pct(counts.top)}%"></span>
+            <span class="compound" style="width:${pct(counts.compound)}%"></span>
+            <span class="isolation" style="width:${pct(counts.isolation)}%"></span>
+          </div>
+          <div class="session-muscles">${muscles.map(m => `<span class="chip">${esc(m)}</span>`).join('')}</div>
         </div>
-        <span class="chev" aria-hidden="true">▾</span>
+        ${icon('chevron', 'chev')}
       </button>
       <div class="session-body" id="day-body-${i}" ${open ? '' : 'hidden'}>
         ${s.exercises.map(htmlExercise).join('')}
