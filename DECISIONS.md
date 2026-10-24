@@ -181,7 +181,7 @@ Contexto: `docs/specs/validador.md`, R5: "Lesiones musculoesqueléticas: no hay 
 2. **Derivación:** se indica consultar a un médico o fisioterapeuta.
 3. **Confirmación explícita, una vez por zona:** "¿Un profesional te autorizó a entrenar con esta lesión?". Cada confirmación se guarda con fecha (`health.injuries[].clearanceDate`, formato `AAAA-MM-DD`).
 - Aplica a cualquier zona, tenga o no diagnóstico profesional y marque o no dolor actual.
-- Se vuelve a pedir si se **agrega** una zona (solo la nueva) o si una zona se quita y se vuelve a agregar. Editar el diagnóstico o el dolor actual de una zona que sigue declarada no la vuelve a pedir. La fecha se conserva entre ediciones del perfil (`carryOverInjuryClearances`, porque el formulario reconstruye las lesiones desde campos planos).
+- Se vuelve a pedir si se **agrega** una zona (solo la nueva) o si una zona se quita y se vuelve a agregar. Editar el diagnóstico o el dolor actual de una zona que sigue declarada ya NO es neutro: ver "Ajuste posterior: re-autorización cuando una zona empeora" más abajo. La fecha se conserva entre ediciones del perfil (`carryOverInjuryClearances`, porque el formulario reconstruye las lesiones desde campos planos).
 - Con síntomas (Capa 1) y lesión a la vez, la pantalla muestra las dos causas de pausa.
 - Los perfiles que ya tenían una lesión declarada desde DEC-009 no tienen `clearanceDate`: se les pide la confirmación una vez, sin migración.
 - El motor calcula el plan igual esté pausado o no (`buildPlan` es puro); es la interfaz la que decide no mostrarlo. Las sesiones solo se inician desde la vista del plan.
@@ -206,4 +206,15 @@ Contexto: `docs/specs/validador.md`, R5: "Lesiones musculoesqueléticas: no hay 
 - Sin lesiones declaradas el plan no cambia y nunca se pausa (identidad contra la línea base).
 - E2E en navegador: pausa → confirmación → fecha guardada → etiqueta E4 → al agregar una zona solo se pide la nueva; aviso de dolor y reemplazo sin heredar la etiqueta de precaución.
 
-**Estado: implementada (Fase 1b).**
+### Ajuste posterior: re-autorización cuando una zona empeora
+La versión original de esta decisión conservaba la autorización de una zona aunque se editara su dolor o su diagnóstico. Eso dejaba entrenando con una autorización dada para otra situación clínica. Ahora, al guardar el perfil (`reconcileInjuryClearances`, función pura de `engine.js`):
+- **Sube el dolor de la zona** (de "sin dolor" a "con dolor actualmente") → se invalida la autorización de esa zona.
+- **Cambia el diagnóstico** (de "sin diagnóstico" a "con diagnóstico profesional", o al revés) → se invalida.
+- **Baja el dolor, o no cambia nada** → no se pide nada; la fecha se conserva.
+- La invalidación es **por zona**: las demás conservan su fecha. Una zona invalidada vuelve a pasar por el mismo flujo de advertencia, derivación y confirmación fechada.
+- La comparación es contra lo guardado inmediatamente antes de editar, no contra el momento de la autorización: si el dolor baja y después vuelve a subir, esa segunda edición es una subida y vuelve a pedir la confirmación (criterio conservador).
+- Hoy el dolor de una zona es una casilla (con dolor / sin dolor), así que "subir" es pasar de sin dolor a con dolor. Si más adelante se agrega una escala por zona, la regla "sube → invalida, baja → no" se mantiene y solo cambia la comparación.
+- `carryOverInjuryClearances` (conservar fechas) se mantiene como estaba; `reconcileInjuryClearances` la compone y además invalida las zonas que empeoraron.
+- Tests: subida de dolor pausa; bajada o igual no pausa; cambio de diagnóstico en ambos sentidos pausa; invalidación solo de la zona afectada; funciones sin mutar entradas; e2e del flujo en navegador. Prueba de mutación: revirtiendo la invalidación fallan 3 tests unitarios y el e2e.
+
+**Estado: implementada (Fase 1b y ajuste posterior).**

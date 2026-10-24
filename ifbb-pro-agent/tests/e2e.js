@@ -218,6 +218,32 @@ const server = http.createServer((req, res) => {
   const afterAdd = await page.evaluate(() => JSON.parse(localStorage.getItem('ifbb-agent:v1')).profiles.find(p => p.data.name === 'Lesión · Test').data.health.injuries);
   if (afterAdd.find(i => i.zone === 'shoulder').clearanceDate !== clearedHealth.injuries[0].clearanceDate) throw new Error('se perdió la fecha de la zona ya confirmada');
 
+  // DEC-011 (ajuste) · re-autorización en navegador: si sube el dolor de una zona
+  // se invalida SOLO esa autorización y el plan se pausa con el mismo flujo; si el
+  // dolor baja no se pide nada; un cambio de diagnóstico también pausa.
+  const injuriesOf = () => page.evaluate(() => JSON.parse(localStorage.getItem('ifbb-agent:v1')).profiles.find(p => p.data.name === 'Lesión · Test').data.health.injuries);
+  const editInjuries = async (fn) => { await page.click('.tab[data-tab=profiles]'); await page.click('#btn-edit'); await fn(); await page.click('button[type=submit]'); };
+  await page.click('[data-injury-clearance="knee"]');
+  await page.waitForSelector('.subtabs');
+  const authorized = await injuriesOf();
+  if (authorized.some(i => !i.clearanceDate)) throw new Error('las dos zonas deberían estar autorizadas: ' + JSON.stringify(authorized));
+  await editInjuries(() => page.check('input[name=injuryPainNow][value=shoulder]')); // sube el dolor del hombro
+  await page.waitForSelector('[data-injury-clearance="shoulder"]');
+  if (await page.$('.subtabs')) throw new Error('subir el dolor de una zona autorizada debería pausar el plan');
+  if (await page.$('[data-injury-clearance="knee"]')) throw new Error('la rodilla no empeoró: no debería volver a pedirse');
+  const afterPainUp = await injuriesOf();
+  if (afterPainUp.find(i => i.zone === 'shoulder').clearanceDate !== null || afterPainUp.find(i => i.zone === 'knee').clearanceDate !== authorized.find(i => i.zone === 'knee').clearanceDate) throw new Error('la invalidación debería ser solo de la zona que empeoró: ' + JSON.stringify(afterPainUp));
+  await page.click('[data-injury-clearance="shoulder"]');
+  await page.waitForSelector('.subtabs');
+  await editInjuries(() => page.uncheck('input[name=injuryPainNow][value=shoulder]')); // baja el dolor del hombro
+  await page.waitForSelector('.subtabs');
+  if (await page.$('[data-injury-clearance]')) throw new Error('bajar el dolor no debería pedir ninguna autorización');
+  await editInjuries(() => page.check('input[name=injuryDiagnosed][value=knee]')); // cambia el diagnóstico de la rodilla
+  await page.waitForSelector('[data-injury-clearance="knee"]');
+  if (await page.$('[data-injury-clearance="shoulder"]') || await page.$('.subtabs')) throw new Error('un cambio de diagnóstico debería pausar el plan solo por esa zona');
+  await page.click('[data-injury-clearance="knee"]');
+  await page.waitForSelector('.subtabs');
+
   // DEC-009 (privacidad) en navegador: el export descargado no trae datos de
   // salud; importar un archivo viejo (con health y painFlags) los ignora, y si ya
   // hay un perfil local con lesiones se avisa antes (cancelar no importa nada).

@@ -804,6 +804,26 @@
     });
   }
 
+  // DEC-011 (re-autorización): conserva la fecha de autorización de las zonas
+  // que siguen declaradas (carryOverInjuryClearances) y la INVALIDA en las que
+  // empeoraron respecto de lo guardado antes de editar: el dolor actual subió
+  // (de "sin dolor" a "con dolor") o el diagnóstico cambió (en cualquier
+  // sentido). Si el dolor baja o no cambia nada, la autorización se mantiene.
+  // Una zona invalidada vuelve a pasar por advertencia → derivación →
+  // confirmación fechada, el mismo flujo de la primera vez.
+  function reconcileInjuryClearances(prevHealth, nextHealth) {
+    const carried = carryOverInjuryClearances(prevHealth, nextHealth);
+    const was = {};
+    ((prevHealth && prevHealth.injuries) || []).forEach(i => { was[i.zone] = i; });
+    return Object.assign({}, carried, {
+      injuries: carried.injuries.map(i => {
+        const before = was[i.zone];
+        const worsened = !!before && ((!!i.painNow && !before.painNow) || !!i.diagnosed !== !!before.diagnosed);
+        return worsened ? Object.assign({}, i, { clearanceDate: null }) : i;
+      }),
+    });
+  }
+
   /* ---------- DEC-009 / DEC-011: dolor en Modo sesión ---------- */
 
   const daysBetweenIso = (fromIso, toIso) => Math.round((Date.parse(toIso) - Date.parse(fromIso)) / 86400000);
@@ -938,5 +958,5 @@
 
   function unique(arr) { return arr.filter((v, i) => v && arr.indexOf(v) === i); }
 
-  return { bmrMifflin, bmrKatch, bodyFatNavy, ffmi, classicLimit, computeMetrics, computeTargets, computeNutrition, computeTraining, computeHealthScreen, buildPlan, normalizeProfile, validateProfile, exerciseFields, carryOverInjuryClearances, applyPainReading, painProfessionalAdvice, exportProfile, prepareImportedProfile, localHealthConflicts, SPLITS, LB_PER_KG };
+  return { bmrMifflin, bmrKatch, bodyFatNavy, ffmi, classicLimit, computeMetrics, computeTargets, computeNutrition, computeTraining, computeHealthScreen, buildPlan, normalizeProfile, validateProfile, exerciseFields, carryOverInjuryClearances, reconcileInjuryClearances, applyPainReading, painProfessionalAdvice, exportProfile, prepareImportedProfile, localHealthConflicts, SPLITS, LB_PER_KG };
 });

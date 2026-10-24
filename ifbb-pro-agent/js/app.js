@@ -354,7 +354,7 @@
 
           <label style="margin-top:.8rem">Lesiones (marcá la zona si tenés una)</label>
           <div id="injury-zones">${KNOWLEDGE.INJURY_ZONES.map(z => injuryZoneRow(z, KNOWLEDGE.INJURY_LABELS[z], injuriesByZone[z])).join('')}</div>
-          <p class="help">Con cualquier zona marcada, el plan queda en pausa hasta que confirmes que un profesional te autorizó a entrenar con esa lesión (se pide una vez por zona y se vuelve a pedir si agregás otra). Como precaución (E4) se evitan algunos ejercicios de la zona: no es una adaptación a tu lesión. En Modo sesión podés registrar el dolor de cada serie que la involucre.</p>
+          <p class="help">Con cualquier zona marcada, el plan queda en pausa hasta que confirmes que un profesional te autorizó a entrenar con esa lesión (se pide una vez por zona y se vuelve a pedir si agregás otra, si el dolor de una zona aumenta o si cambia su diagnóstico). Como precaución (E4) se evitan algunos ejercicios de la zona: no es una adaptación a tu lesión. En Modo sesión podés registrar el dolor de cada serie que la involucre.</p>
 
           ${hasHealthData ? '<div class="btn-row"><button type="button" class="btn btn-danger" id="btn-clear-health">Borrar datos de salud</button></div>' : ''}
         </fieldset>
@@ -408,7 +408,7 @@
       const errors = ENGINE.validateProfile(data);
       if (errors.length) { $('#form-errors').innerHTML = errors.map(x => `<div class="alert danger">${esc(x)}</div>`).join(''); window.scrollTo({ top: document.body.scrollHeight }); return; }
       const norm = ENGINE.normalizeProfile(data);
-      norm.health = ENGINE.carryOverInjuryClearances(editing && editing.data.health, norm.health); // DEC-011
+      norm.health = ENGINE.reconcileInjuryClearances(editing && editing.data.health, norm.health); // DEC-011
       if (editing) { editing.data = norm; editing.updatedAt = todayIso(); state.activeId = editing.id; }
       else {
         const p = { id: uid(), createdAt: todayIso(), updatedAt: todayIso(), data: norm, log: [] };

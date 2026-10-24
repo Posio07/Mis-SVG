@@ -839,3 +839,82 @@ test('DEC-009 privacidad: se avisa antes de importar si ya hay un perfil local c
   assert.deepEqual(E.localHealthConflicts([local, plainLocal], { id: 'x', data: Object.assign({}, male, { name: 'Otro' }) }), [], 'el parecido sin lesiones locales no avisa');
   assert.deepEqual(E.localHealthConflicts([local], { id: 'x', data: Object.assign({}, male, { name: 'Nadie' }) }), []);
 });
+
+/* ---------- DEC-011 (ajuste): la autorización se invalida cuando una zona empeora ---------- */
+
+// Perfil guardado con las zonas dadas, todas con autorización fechada, y los
+// flags de dolor/diagnóstico indicados. Devuelve el perfil y la edición típica.
+function authorizedProfile(zones, { pain = [], diagnosed = [] } = {}) {
+  const base = E.normalizeProfile(withInjury(zones, { injuryPainNow: pain, injuryDiagnosed: diagnosed }));
+  base.health = zones.reduce((h, z, i) => cleared(h, z, `2026-09-1${i}`), base.health);
+  return base;
+}
+function editAndReconcile(stored, zones, { pain = [], diagnosed = [] } = {}) {
+  const edited = E.normalizeProfile(withInjury(zones, { injuryPainNow: pain, injuryDiagnosed: diagnosed }));
+  const health = E.reconcileInjuryClearances(stored.health, edited.health);
+  return { health, plan: E.buildPlan(Object.assign({}, edited, { health }), TODAY) };
+}
+
+test('DEC-011: una subida del dolor de una zona invalida su autorización y pausa el plan', () => {
+  const stored = authorizedProfile(['shoulder']);
+  assert.equal(E.buildPlan(stored, TODAY).health.blocked, false, 'autorizado y sin cambios: el plan se muestra');
+  const { health, plan } = editAndReconcile(stored, ['shoulder'], { pain: ['shoulder'] });
+  assert.equal(health.injuries[0].clearanceDate, null);
+  assert.equal(health.injuries[0].painNow, true);
+  assert.equal(plan.health.blocked, true);
+  assert.deepEqual(plan.health.injuryClearance.pendingZones, ['shoulder']);
+  // Mismo flujo que la primera vez: advertencia + derivación, y se destraba con una confirmación fechada nueva.
+  assert.match(plan.health.injuryBlockReason, /no puede adaptar una rutina a una lesión/);
+  const reconfirmed = Object.assign({}, stored, { health: cleared(health, 'shoulder', '2026-09-20') });
+  assert.equal(E.buildPlan(reconfirmed, TODAY).health.blocked, false);
+  assert.equal(E.buildPlan(reconfirmed, TODAY).health.injuries[0].clearanceDate, '2026-09-20');
+});
+
+test('DEC-011: una bajada del dolor, o dejarlo igual, no pide nada', () => {
+  const stored = authorizedProfile(['shoulder', 'knee'], { pain: ['shoulder', 'knee'] });
+  const down = editAndReconcile(stored, ['shoulder', 'knee'], { pain: ['knee'] }); // el hombro baja, la rodilla sigue igual
+  assert.deepEqual(down.health.injuries.map(i => [i.zone, i.painNow, i.clearanceDate]), [['shoulder', false, '2026-09-10'], ['knee', true, '2026-09-11']]);
+  assert.equal(down.plan.health.blocked, false);
+  const allDown = editAndReconcile(stored, ['shoulder', 'knee']);
+  assert.equal(allDown.plan.health.blocked, false);
+  assert.deepEqual(allDown.health.injuries.map(i => i.clearanceDate), ['2026-09-10', '2026-09-11']);
+  const same = editAndReconcile(stored, ['shoulder', 'knee'], { pain: ['shoulder', 'knee'] });
+  assert.equal(same.plan.health.blocked, false);
+});
+
+test('DEC-011: un cambio de diagnóstico, en cualquier sentido, invalida la autorización y pausa el plan', () => {
+  const undiagnosed = authorizedProfile(['knee']);
+  const gotDiagnosis = editAndReconcile(undiagnosed, ['knee'], { diagnosed: ['knee'] });
+  assert.equal(gotDiagnosis.health.injuries[0].clearanceDate, null);
+  assert.equal(gotDiagnosis.plan.health.blocked, true);
+  const diagnosed = authorizedProfile(['knee'], { diagnosed: ['knee'] });
+  const lostDiagnosis = editAndReconcile(diagnosed, ['knee']);
+  assert.equal(lostDiagnosis.health.injuries[0].clearanceDate, null);
+  assert.equal(lostDiagnosis.plan.health.blocked, true);
+  // Diagnóstico que cambia a la vez que el dolor baja: pausa igual (cambió el diagnóstico).
+  const both = editAndReconcile(authorizedProfile(['knee'], { pain: ['knee'] }), ['knee'], { diagnosed: ['knee'] });
+  assert.equal(both.plan.health.blocked, true);
+  // Diagnóstico sin cambios: se mantiene.
+  assert.equal(editAndReconcile(diagnosed, ['knee'], { diagnosed: ['knee'] }).plan.health.blocked, false);
+});
+
+test('DEC-011: la invalidación es por zona; las demás conservan su fecha, y las zonas nuevas siguen pidiéndose', () => {
+  const stored = authorizedProfile(['shoulder', 'knee']);
+  const { health, plan } = editAndReconcile(stored, ['shoulder', 'knee', 'ankle'], { pain: ['knee'] });
+  assert.deepEqual(health.injuries.map(i => [i.zone, i.clearanceDate]), [['shoulder', '2026-09-10'], ['knee', null], ['ankle', null]]);
+  assert.deepEqual(plan.health.injuryClearance.pendingZones, ['knee', 'ankle']);
+  assert.doesNotMatch(plan.health.injuryBlockReason, /Hombro/);
+});
+
+test('DEC-011: reconcileInjuryClearances no muta sus entradas, tolera no tener estado previo y respeta carryOverInjuryClearances', () => {
+  const stored = authorizedProfile(['shoulder']);
+  const edited = E.normalizeProfile(withInjury(['shoulder'], { injuryPainNow: ['shoulder'] }));
+  const storedBefore = JSON.stringify(stored.health), editedBefore = JSON.stringify(edited.health);
+  E.reconcileInjuryClearances(stored.health, edited.health);
+  assert.equal(JSON.stringify(stored.health), storedBefore);
+  assert.equal(JSON.stringify(edited.health), editedBefore);
+  assert.equal(E.reconcileInjuryClearances(undefined, edited.health).injuries[0].clearanceDate, null, 'sin estado previo no inventa fechas');
+  // Sin cambios de dolor ni diagnóstico equivale exactamente a carryOver.
+  const noChange = E.normalizeProfile(withInjury(['shoulder']));
+  assert.deepEqual(E.reconcileInjuryClearances(stored.health, noChange.health), E.carryOverInjuryClearances(stored.health, noChange.health));
+});
