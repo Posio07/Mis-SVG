@@ -1,4 +1,4 @@
-# IFBB Pro Agent
+# Training Agent
 
 Agente de preparación física para el teléfono: introduces tus datos y tu objetivo y obtienes plan de dieta, plan de entrenamiento y medidas objetivo calculados **solo** a partir de fuentes verificadas (revisiones sistemáticas, metaanálisis, posicionamientos oficiales de la ISSN y el ACSM, organismos reguladores y el reglamento de la IFBB Pro League). Cada cifra del plan lleva la clave de la fuente que la respalda y la pestaña **Fuentes** lista todas las referencias con enlace.
 

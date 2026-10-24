@@ -732,11 +732,11 @@
 
   function sharePlan(plan) {
     const n = plan.nutrition, t = plan.targets;
-    const text = `IFBB Pro Agent · ${plan.input.name}\n${t.division.label} · ${plan.input.goal}\n` +
+    const text = `Training Agent · ${plan.input.name}\n${t.division.label} · ${plan.input.goal}\n` +
       `Calorías: ${n.calories} kcal (P ${n.protein} g · C ${n.carbs} g · G ${n.fat} g)\n` +
       `Grasa ${Math.round(plan.metrics.bodyFat * 10) / 10} % → ${t.targetBf} % · Peso ${plan.input.weightKg} → ${Math.round(t.targetWeight * 10) / 10} kg en ~${Math.round(t.weeksNeeded)} semanas\n` +
       `Entreno: ${plan.training.splitName}, ${plan.training.daysPerWeek} días/semana`;
-    if (navigator.share) navigator.share({ title: 'Plan IFBB Pro Agent', text }).catch(() => {});
+    if (navigator.share) navigator.share({ title: 'Plan Training Agent', text }).catch(() => {});
     else if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => toast('Resumen copiado'));
   }
 
@@ -1366,7 +1366,7 @@
           <li>La app no sustituye a un médico, dietista-nutricionista o entrenador certificado.</li>
         </ul>
       </div>
-      <p class="muted" style="font-size:.75rem">IFBB Pro Agent · versión 1.0 · datos guardados solo en este dispositivo.</p>`;
+      <p class="muted" style="font-size:.75rem">Training Agent · versión 1.0 · datos guardados solo en este dispositivo.</p>`;
   }
 
   /* ---------- PWA ---------- */
