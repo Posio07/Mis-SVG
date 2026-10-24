@@ -1,6 +1,6 @@
 {
-  "name": "IFBB Pro Agent — Entrenamiento y dieta basados en evidencia",
-  "short_name": "IFBB Agent",
+  "name": "Training Agent — Entrenamiento y dieta basados en evidencia",
+  "short_name": "Training Agent",
   "description": "Plan de entrenamiento, dieta y medidas objetivo con fuentes científicas citadas. Varios perfiles, sin conexión.",
   "start_url": "./index.html",
   "scope": "./",
