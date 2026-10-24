@@ -173,6 +173,8 @@ Contexto: `docs/specs/validador.md` (23-oct-2026). El validador necesita contar 
 
 **Estado: implementada (Fase 1).** Todavía no hay validación ni recortes: esta decisión solo prepara los datos.
 
+**Nota (DEC-012):** la tabla de aporte ya no es un literal en `knowledge.js`: ahora se carga desde `data/exercise-muscles.csv` y suma un nivel de evidencia por fila. Los valores no cambiaron.
+
 ## DEC-011 · Lesiones: autorización profesional por zona, precauciones E4 y aviso por dolor
 Contexto: `docs/specs/validador.md`, R5: "Lesiones musculoesqueléticas: no hay un framework validado para adaptar la rutina desde una app. Se advierte, se deriva a un profesional y solo se genera la rutina tras confirmación explícita de que un profesional autorizó el entrenamiento. Nunca: generar como si la condición no existiera, ni fingir una adaptación." Esta decisión reencuadra la Capa 3 de DEC-009 (que hablaba de "adaptar") sin cambiar el mapa de exclusiones.
 
@@ -219,3 +221,40 @@ La versión original de esta decisión conservaba la autorización de una zona a
 - Tests: subida de dolor pausa; bajada o igual no pausa; cambio de diagnóstico en ambos sentidos pausa; invalidación solo de la zona afectada; funciones sin mutar entradas; e2e del flujo en navegador. Prueba de mutación: revirtiendo la invalidación fallan 3 tests unitarios y el e2e.
 
 **Estado: implementada (Fase 1b y ajuste posterior).**
+
+## DEC-012 · Tabla de músculos por ejercicio en un CSV versionado, con nivel de evidencia
+Contexto: `docs/specs/validador.md` pide contar series fraccionadas (primario 1,0, secundario 0,5) y que el conteo "se verifique contra el catálogo completo con las etiquetas corregidas". Para eso la tabla de DEC-010 necesita fuente por fila y un lugar donde se pueda revisar y corregir sin tocar código. Esta fase solo crea la capa de datos: **no cambia cómo se cuenta el volumen** (eso es la Fase 2) y la salida del plan es idéntica.
+
+### Decisión
+- **La tabla vive en `data/exercise-muscles.csv`**, versionado en git. Columnas: `exerciseId, muscle, role, evidence_level, source, notes, review_date`. Reemplaza al literal de DEC-010 en `knowledge.js`. 61 filas: 34 `primary` y 27 `secondary`.
+- **`role` solo vale `primary` o `secondary`. No se cargan antagonistas ni estabilizadores.** El criterio sigue el de Pelland et al. 2026 (sección 2.5): primario = el músculo "probablemente generador primario de fuerza"; secundario = "probablemente entrenado de forma significativa pero no generador primario (sinergista)". Solo los 10 grupos de la app.
+- **Jerarquía de evidencia por fila:**
+  - `verificado`: un estudio que midió hipertrofia de ese músculo con ese ejercicio o uno equivalente (la nota aclara "equivalente").
+  - `probable`: solo EMG o una clasificación publicada (Tabla 1 de Pelland et al. 2026). Esto último amplía la definición de "EMG o manual de referencia": la Tabla 1 es la decisión de los autores sobre qué ejercicio cuenta como directo o indirecto, no una medición. Cambiarlo a `a_verificar` es editar la columna.
+  - `a_verificar`: sin fuente leída. Es preferible a una cita de la que no se está seguro: **no se inventan citas**. Una fila `a_verificar` puede llevar una fuente de contexto o en contra, y la nota lo dice.
+  - Solo `verificado` y `probable` exigen `source` (autor, año, título y revista de lo que se leyó). Los resúmenes se leyeron por PubMed; el texto completo solo se abrió en Pelland 2026 y en el preprint de Remmert.
+- **Distinto de E1-E4.** `evidence_level` es por fila. La etiqueta `evidence: 'E4'` de `EXERCISE_CONTRIBUTION` sigue igual: la tabla como regla de la app sigue siendo E4 (criterio de la app) hasta validarla. `evidenceLevel` y las filas (fuente, nota, fecha) viajan con los datos, pero **ningún cálculo los consume todavía** (un test lo vigila sobre `engine.js` y sobre las claves del plan).
+- **Paseo del granjero:** sin filas, igual que hoy (sin primary y sin secundarios, DEC-010). Está declarado en `NO_MUSCLE_CONTRIBUTION` de `knowledge.js`; los tests exigen que ese sea el único ejercicio sin filas y que nadie más lo esté.
+- **Resultado de la carga inicial:** 18 `verificado` (13 primary y 5 secondary), 26 `probable` (14 y 12) y 17 `a_verificar` (7 y 10). Fuentes y hallazgos en `docs/research/fuentes-musculos-ejercicio.md`.
+
+### Hallazgos que cuestionan datos actuales (no se cambió ningún valor en esta fase)
+- `glutes.hip_thrust` → isquios: `a_verificar`. Plotkin 2023 midió el área de isquios con hip thrust y no encontró crecimiento apreciable (EMG de Contreras 2015 sí muestra más bíceps femoral que la sentadilla). Candidata a revisar en la Fase 2.
+- `glutes.bulgarian_hip` → cuádriceps (0,5): Pelland 2026 clasifica la búlgara como serie directa para el cuádriceps (1,0).
+- `back.pullover_cable`: Di Fonza 2026 (revisión de EMG) reporta que el pullover parece activar más el pectoral que el dorsal; el primario `back` queda sin respaldo.
+- Sentadilla y prensa → glúteo (0,5): Kubo 2019 midió glúteo mayor +6,7 % con sentadilla completa y Kinoshita 2026, +15,4 % con prensa. El 0,5 podría subestimar ese aporte.
+- Sin respaldo en el dataset de Pelland: no midió glúteo, dorsal, deltoides lateral/posterior, pantorrillas ni abdomen.
+
+### Cómo llega a la app
+- GitHub Pages solo publica `ifbb-pro-agent/` y el modo sin conexión necesita todo precargado, así que la app **no lee el CSV**. `scripts/build-exercise-muscles.js` lo valida y genera `ifbb-pro-agent/js/exerciseMuscles.js`, que se **sube al repositorio**. `index.html` lo carga antes de `knowledge.js` y `sw.js` lo precarga (versión de caché en v4).
+- El parser acepta coma y punto y coma (Excel en español guarda con punto y coma), BOM, CRLF y comillas, y rechaza con un mensaje por fila: `role`, `evidence_level` o `muscle` inválidos, `verificado` o `probable` sin `source`, fecha que no sea `AAAA-MM-DD`, pares repetidos y más de un `primary` por ejercicio. `data/README.md` explica cómo abrirlo y guardarlo desde Excel.
+- Un test falla si el módulo no coincide con el CSV. Consecuencia: editar el CSV en GitHub sin regenerar el módulo frena el despliegue (la puerta de Pages corre `engine.test.js`). Alternativa no adoptada: un paso de build en el workflow, que implica modificar el CI/CD.
+
+### Por qué no una base de datos externa
+- **Sin conexión:** la app es una PWA y tiene que funcionar sin red; una base externa agregaría un pedido de red y un estado de error en el generador.
+- **DEC-009:** los datos del usuario no salen del dispositivo. Hoy la app no hace ningún pedido a un servicio propio ni maneja credenciales; una base externa lo cambiaría, con cuenta, claves y superficie de ataque.
+- **Tamaño:** 35 ejercicios y 61 filas (el CSV pesa ~28 KB y el módulo generado ~34 KB). Cabe en el repositorio, cada cambio se revisa en un PR con su historial y se edita con Excel.
+
+### Tests (`engine.test.js`)
+Cada `exerciseId` del CSV existe en el catálogo y viceversa (salvo el paseo); exactamente un `primary` por ejercicio; valores válidos de `role`, `evidence_level`, `muscle` y fecha; `source` en `verificado` y `probable`; citas con autor y año; el parser lee igual coma y punto y coma (con BOM y CRLF) y respeta comillas, delimitadores y saltos de línea dentro de un campo; rechaza datos inválidos; el módulo generado coincide con el CSV; el catálogo toma `muscle`, `secondary` y nivel del CSV en su orden; conteo de niveles; ningún cálculo consume el nivel; y la salida de los 30 planes (10 perfiles × sin extras, con `healthGoal` y con `healthGoal` más lesiones) es idéntica a la de `main` antes de la fase (huellas en `tests/fixtures/plan-hashes.json`, regenerables con `scripts/snapshot-plan-hashes.js` solo si un cambio de salida es intencional). Prueba de mutación: cambiar a mano un `primary` en el CSV hace fallar 2 tests si no se regenera el módulo y 6 si se regenera.
+
+**Estado: implementada (capa de datos).** El nivel de evidencia todavía no se usa en ningún cálculo.
