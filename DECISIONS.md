@@ -78,6 +78,8 @@ Este archivo es la fuente de verdad de la lógica de negocio. Antes de cambiar c
 
 **Segundo bug encontrado en verificación (punto 4):** el reparto de los 3 ejercicios funcionales era un round-robin simple, pero cuádriceps solo entrena 2 veces por semana en todos los splits: con 3 opciones y 2 ocurrencias, "paseo del granjero" (el 3º de la lista) nunca llegaba a salir. Corregido reservando el acarreo para la última vez que el músculo aparece esa semana, y rotando las otras dos opciones (búlgara, step-up) en las ocurrencias anteriores. También se ajustó a qué ejercicio se le quitan series para financiarlo: antes podía tocar el propio ejercicio con top set si no había aislamiento ese día; ahora prioriza un compuesto sin top set (p. ej. prensa) antes que el que lo tiene.
 
+**Corrección por DEC-010:** la regla de financiamiento descrita arriba solo vale para los funcionales que SÍ aportan volumen de hipertrofia al grupo (búlgara con mancuernas y step-up: primario cuádriceps, glúteo secundario). El paseo del granjero no aporta a ningún grupo: si se financiara quitándole series a un aislamiento, el volumen real de cuádriceps bajaría hasta 2 series por semana sin que nada lo reemplace. Por eso el paseo ahora se agrega aparte (2 series, `muscle: null`, etiqueta "Funcional"), sin descontar de ningún ejercicio. Cuenta en `totalSets` y en la duración, no en el volumen del grupo. Efecto visible, solo con la bandera activa: el último día de pierna suma 2 series y, en los 10 perfiles de prueba, entre 6 y 13 minutos de duración, y puede acercarse o cruzar el aviso de 25 series.
+
 ## DEC-008 · Elegibilidad del top set
 - El top set solo se asigna a multiarticulares bilaterales con carga libre o guiada pesada, de esta lista: sentadilla trasera, sentadilla hack, press banca, press militar, peso muerto rumano, remo con barra, dominadas/fondos lastrados.
 - Nunca a unilaterales ni a máquinas de press.
@@ -92,6 +94,7 @@ Este archivo es la fuente de verdad de la lógica de negocio. Antes de cambiar c
 - La app NO reemplaza ni emula a un médico, fisioterapeuta ni entrenador certificado.
 - Solo adapta el plan cuando hay una regla de un posicionamiento oficial o algoritmo validado cargado en este archivo.
 - Si una condición declarada no tiene regla cargada, la app NO ajusta nada: muestra "Consultá con un profesional antes de seguir este plan" y registra la condición.
+- *Precisión por DEC-011:* "adaptar" aplica al tamizaje y a diabetes (posicionamientos oficiales). Para lesiones no existe un marco validado: la app no adapta la rutina, exige autorización profesional y solo evita ejercicios como precaución E4.
 
 ## DEC-009 · Condiciones de salud y lesiones
 
@@ -135,9 +138,18 @@ El plan de la app se considera de intensidad vigorosa a estos efectos. Lógica:
 ### Privacidad
 - Los datos de salud (tamizaje, diabetes, lesiones, registros de dolor) se guardan solo en el dispositivo (`localStorage`), nunca se incluyen en la exportación JSON del perfil y se pueden borrar con un botón ("Borrar datos de salud") sin afectar el resto del perfil.
 
+**Arreglo posterior (esta regla no se cumplía en el código):** al revisar DEC-011 se vio que `exportJson` serializaba el perfil completo (`JSON.stringify(profile)`), así que el archivo exportado llevaba `data.health` (tamizaje, diabetes, lesiones y, desde DEC-011, la fecha de autorización por zona), `painFlags` y el dolor registrado en cada serie (`workouts[].pain`), a pesar de lo escrito arriba. Se corrigió con funciones puras de `engine.js`, testeadas:
+- **Export (`exportProfile`):** copia del perfil sin `data.health`, sin `painFlags` y sin `workouts[].pain`. Se conserva el resto (datos, medidas, historial de fuerza con peso y repeticiones). No muta el perfil local.
+- **Import (`prepareImportedProfile`):** ignora y no guarda `health`, los campos planos de salud del formulario y `painFlags`, también en archivos exportados con la versión anterior que sí los traían. Un perfil importado queda siempre sin lesiones declaradas, sin tamizaje y sin diabetes; si el archivo traía datos de salud con contenido, se avisa en pantalla que se ignoraron. `workouts` tampoco se importa (nunca se importó).
+- **Advertencia previa (`localHealthConflicts`):** el import nunca pisa un perfil existente (siempre crea uno nuevo), así que no se pueden borrar lesiones locales. Aun así, si ya hay un perfil local con lesiones declaradas que tiene el mismo id de exportación o el mismo nombre, se pregunta antes de importar y se explica que el nuevo quedará sin lesiones y que el existente conserva las suyas. Cancelar no importa nada.
+- **Por qué:** los datos de salud son sensibles. Un archivo exportado suele terminar en un chat, un correo o una nube, y no tiene por qué llevar lesiones, diabetes ni fechas de autorización médica de nadie.
+- Quien ya tenga archivos exportados con la versión anterior conserva esos datos dentro de ellos: el arreglo evita nuevas filtraciones, pero no puede borrar lo que ya se exportó.
+
 ### Disclaimer
 Visible en el perfil y en el plan cuando haya cualquier condición declarada (tamizaje con aviso, diabetes o alguna lesión):
 > "Estas adaptaciones aplican posicionamientos científicos oficiales y no reemplazan la valoración de un médico, fisioterapeuta o entrenador certificado."
+
+**Reemplazado por DEC-011:** el texto de arriba afirmaba "adaptaciones" y ya no se usa. Para lesiones, la app no adapta la rutina; ver DEC-011 para el texto vigente y el flujo de autorización profesional.
 
 ### Tests
 - Síntomas (c) = sí → el plan queda oculto hasta marcar la autorización médica.
@@ -146,3 +158,64 @@ Visible en el perfil y en el plan cuando haya cualquier condición declarada (ta
 - Sin condiciones declaradas → el plan queda idéntico al que generaba el motor antes de DEC-009.
 
 **Estado: implementada.**
+
+## DEC-010 · Aporte de volumen por ejercicio (base del validador)
+Contexto: `docs/specs/validador.md` (23-oct-2026). El validador necesita contar series fraccionadas por músculo (primario 1.0, secundario 0.5) y un historial confiable. Hasta ahora el "músculo" de un ejercicio era el grupo donde vive en el catálogo, sin secundarios.
+
+- **Ubicación ≠ aporte.** El bucket (`EXERCISES[grupo]` / `FUNCTIONAL_EXERCISES[grupo]`) define dónde vive un ejercicio: día, rotación, mapa de lesiones. El aporte de volumen sale de una tabla por ejercicio (`EXERCISE_CONTRIBUTION` en `knowledge.js`).
+- **Campos del ejercicio en el plan:** `exerciseId`, `bucket` (dónde vive), `muscle` (primario real; `null` si no suma volumen de hipertrofia), `muscleLabel` ("Funcional" cuando `muscle` es null) y `secondary` (lista, peso 0.5). Para todo el catálogo salvo el paseo del granjero `muscle` coincide con `bucket`, así que ningún plan sin `healthGoal` cambia.
+- **`exerciseId` único por entrada del catálogo, estable e inmutable** (`grupo.slug`, p. ej. `glutes.bulgarian_hip`). `pattern` no sirve de id: `split_squat` aparece 3 veces con primarios distintos y `lateral_raise` 2 veces en el mismo bucket. El nombre es solo de pantalla.
+- **Historial:** cada serie de `profile.workouts` guarda `exerciseId` desde ahora. Las series viejas solo tienen `exercise` (nombre): se mapean por nombre con `EXERCISE_ID_BY_NAME`, posible porque los nombres del catálogo son únicos (hay un test que lo exige).
+- **Tabla de aporte (todo E4: criterio de la app, sin fuente, hasta validarla).** Solo los 10 grupos existentes como primario/secundario. Correcciones aprobadas sobre la propuesta inicial: sin `abs` en sentadilla, sin `back` en peso muerto rumano, sin `chest` en press militar ni en press landmine, sin isquios en patada de glúteo. Hip thrust → isquios queda marcado `status: 'a_verificar'`. Paseo del granjero: sin aporte en ningún grupo (ni siquiera abs).
+- **Configuración central** (`VALIDATOR_RULES` en `knowledge.js`, sin JSON externo): cada regla con `value`, `level` (E1-E4), `source`, `reviewedAt` y `verifiedAgainstPrimarySource` (false en todas: solo se consultaron resúmenes; el spec exige verificar contra la fuente primaria antes de fijar cada valor). `sessionSetCap` (25, el aviso de DEC-003 v2) entra como E4, sin fuente y con `reviewRequired: true`. `setExecutionSeconds` (45) es un supuesto fijo, a calibrar con tiempos reales del modo sesión. El motor ya lee de ahí el tope de 25, los 45 s y las series del paseo del granjero (`functionalNoVolumeExtraSets`: 2, E4, sin fuente, `reviewRequired: true`, mismo formato que `sessionSetCap`; se lee en el momento de generar el plan); los valores de R1-R3 están cargados pero todavía no los consume ninguna regla (fases siguientes).
+- **DEC-005:** ver "Corrección por DEC-010" en esa decisión (el paseo del granjero se agrega sin descontar series).
+- Tests: tabla completa y sin filas huérfanas; correcciones aprobadas; ids y nombres únicos; reglas bien formadas; identidad contra una línea base capturada con el motor anterior (10 perfiles sin `healthGoal` ni lesiones). El test compara TODO el plan y solo admite las diferencias de una lista blanca explícita de rutas (`exerciseId`, `bucket`, `secondary` por ejercicio y, desde DEC-011, `health.injuryBlockReason` y `health.injuryClearance`): cualquier clave nueva, quitada o cambiada que no esté listada lo hace fallar, y una ruta listada que ya no difiera también (para que la lista no quede vieja); paseo del granjero sin descuento y con volumen semanal intacto.
+
+**Estado: implementada (Fase 1).** Todavía no hay validación ni recortes: esta decisión solo prepara los datos.
+
+## DEC-011 · Lesiones: autorización profesional por zona, precauciones E4 y aviso por dolor
+Contexto: `docs/specs/validador.md`, R5: "Lesiones musculoesqueléticas: no hay un framework validado para adaptar la rutina desde una app. Se advierte, se deriva a un profesional y solo se genera la rutina tras confirmación explícita de que un profesional autorizó el entrenamiento. Nunca: generar como si la condición no existiera, ni fingir una adaptación." Esta decisión reencuadra la Capa 3 de DEC-009 (que hablaba de "adaptar") sin cambiar el mapa de exclusiones.
+
+### Flujo con cualquier zona declarada
+1. **Advertencia:** el plan queda en pausa ("Plan en pausa", mismo patrón que la Capa 1 de DEC-009). El texto dice que la app no puede adaptar una rutina a una lesión porque no existe un marco validado.
+2. **Derivación:** se indica consultar a un médico o fisioterapeuta.
+3. **Confirmación explícita, una vez por zona:** "¿Un profesional te autorizó a entrenar con esta lesión?". Cada confirmación se guarda con fecha (`health.injuries[].clearanceDate`, formato `AAAA-MM-DD`).
+- Aplica a cualquier zona, tenga o no diagnóstico profesional y marque o no dolor actual.
+- Se vuelve a pedir si se **agrega** una zona (solo la nueva) o si una zona se quita y se vuelve a agregar. Editar el diagnóstico o el dolor actual de una zona que sigue declarada ya NO es neutro: ver "Ajuste posterior: re-autorización cuando una zona empeora" más abajo. La fecha se conserva entre ediciones del perfil (`carryOverInjuryClearances`, porque el formulario reconstruye las lesiones desde campos planos).
+- Con síntomas (Capa 1) y lesión a la vez, la pantalla muestra las dos causas de pausa.
+- Los perfiles que ya tenían una lesión declarada desde DEC-009 no tienen `clearanceDate`: se les pide la confirmación una vez, sin migración.
+- El motor calcula el plan igual esté pausado o no (`buildPlan` es puro); es la interfaz la que decide no mostrarlo. Las sesiones solo se inician desde la vista del plan.
+
+### Precauciones E4
+- **Exclusiones por zona** (mapa de DEC-009, sin cambios): se aplican después de la autorización y son una **precaución heurística E4** (criterio de la app, sin fuente). Un aviso `{ evidence: 'E4' }` por zona lo dice en el plan, con la etiqueta visible "E4 · heurística".
+- **Sustituto `shoulder_press_safe`:** también E4. El ejercicio del plan lleva `injurySubstitute: { zone, evidence: 'E4' }` y se muestra con la etiqueta. Un reemplazo por dolor (Capa B) NO hereda esa marca del ejercicio original: solo la lleva si el reemplazo es, a su vez, un ejercicio `injuryOnly`.
+- **Texto de la interfaz:** ninguno puede decir que la rutina está adaptada a la lesión. Texto vigente del plan con condiciones: *"Estos avisos aplican posicionamientos científicos oficiales cuando existen y no reemplazan la valoración de un médico, fisioterapeuta o entrenador certificado."* + (con lesiones) *"Para lesiones la app no adapta la rutina: solo evita algunos ejercicios de la zona como precaución (E4) una vez que un profesional te autorizó a entrenar."* Reescritos también el texto de ayuda de Salud y el de lesiones del formulario.
+
+### Dolor en Modo sesión (Capa B de DEC-009), aviso E4
+- Se conserva la regla de DEC-009: dolor por encima del umbral marca el patrón para sustituir; se desmarca con 2 sesiones DISTINTAS seguidas sin pasarse. La lógica pasó a funciones puras de `engine.js` (`applyPainReading`, `painProfessionalAdvice`), testeadas, sin cambiar su comportamiento.
+- **Aviso nuevo:** si un patrón tuvo dolor por encima del umbral en **2 o más sesiones distintas dentro de las últimas 4 semanas** (no necesariamente seguidas), el Modo sesión recomienda consultar a un profesional antes de seguir cargando ese movimiento. Etiqueta E4. Se evalúa sobre el patrón original del plan, haya sido sustituido o no, e independientemente de si la marca de sustitución sigue activa.
+- Dos series con dolor de la misma sesión cuentan una vez. "Últimas 4 semanas" = 28 días hacia atrás, inclusive (a los 29 días la sesión deja de contar). El registro por patrón guarda `painSessions: [{ sessionId, date }]` y poda lo que sale de la ventana.
+- Valores en `VALIDATOR_RULES`, todos E4: `painFlagThreshold` (5, con la fuente de Silbernagel 2007 ya citada en DEC-009), `painAdviceMinSessions` (2), `painAdviceWindowDays` (28).
+
+### Tests
+- Lesión declarada sin confirmar → plan pausado, con advertencia y derivación; con diagnóstico o sin él.
+- Confirmación por zona con fecha: con una de dos zonas confirmadas, solo falta la otra; con todas, el plan se muestra.
+- La fecha se conserva al editar; se vuelve a pedir al agregar una zona o al quitarla y volver a agregarla.
+- Ningún texto del motor ni del código de la interfaz afirma adaptación a la lesión (detector probado contra los textos viejos); las precauciones llevan `evidence: 'E4'`.
+- Aviso por dolor: 2 sesiones distintas dentro de 28 días (no seguidas); una sesión o dos series de la misma sesión no alcanzan; dolor igual al umbral no cuenta; el día 28 cuenta y el 29 no; sin mutar el registro anterior.
+- Sin lesiones declaradas el plan no cambia y nunca se pausa (identidad contra la línea base).
+- E2E en navegador: pausa → confirmación → fecha guardada → etiqueta E4 → al agregar una zona solo se pide la nueva; aviso de dolor y reemplazo sin heredar la etiqueta de precaución.
+
+### Ajuste posterior: re-autorización cuando una zona empeora
+La versión original de esta decisión conservaba la autorización de una zona aunque se editara su dolor o su diagnóstico. Eso dejaba entrenando con una autorización dada para otra situación clínica. Ahora, al guardar el perfil (`reconcileInjuryClearances`, función pura de `engine.js`):
+- **Sube el dolor de la zona** (de "sin dolor" a "con dolor actualmente") → se invalida la autorización de esa zona.
+- **Cambia el diagnóstico** (de "sin diagnóstico" a "con diagnóstico profesional", o al revés) → se invalida.
+- **Baja el dolor, o no cambia nada** → no se pide nada; la fecha se conserva.
+- La invalidación es **por zona**: las demás conservan su fecha. Una zona invalidada vuelve a pasar por el mismo flujo de advertencia, derivación y confirmación fechada.
+- La comparación es contra lo guardado inmediatamente antes de editar, no contra el momento de la autorización: si el dolor baja y después vuelve a subir, esa segunda edición es una subida y vuelve a pedir la confirmación (criterio conservador).
+- Hoy el dolor de una zona es una casilla (con dolor / sin dolor), así que "subir" es pasar de sin dolor a con dolor. Si más adelante se agrega una escala por zona, la regla "sube → invalida, baja → no" se mantiene y solo cambia la comparación.
+- **Explicación en la pausa:** cuando una zona vuelve a pedirse por haber empeorado (y no cuando es su primera autorización), la pantalla de pausa agrega arriba del texto de siempre la línea *"Se pide de nuevo porque registraste dolor o cambiaste el diagnóstico en [zona]"*, con solo las zonas afectadas. La primera pausa y la de una zona nueva quedan sin esa línea. Para saber la diferencia, `reconcileInjuryClearances` marca la zona con `clearanceInvalidated: true` solo cuando pierde una autorización que ya tenía; la marca sobrevive a más ediciones mientras la zona siga sin confirmar (incluso si el dolor vuelve a bajar o empeora otra vez) y se borra al confirmar. La clave solo existe cuando vale `true`, así que no cambia nada para quien no empeoró. `zonesPendingReauthorization` (función pura) devuelve esas zonas. La marca es parte de `health`: no entra en `plan.health` ni sale en el export.
+- `carryOverInjuryClearances` (conservar fechas) se mantiene como estaba; `reconcileInjuryClearances` la compone y además invalida las zonas que empeoraron.
+- Tests: subida de dolor pausa; bajada o igual no pausa; cambio de diagnóstico en ambos sentidos pausa; invalidación solo de la zona afectada; funciones sin mutar entradas; e2e del flujo en navegador. Prueba de mutación: revirtiendo la invalidación fallan 3 tests unitarios y el e2e.
+
+**Estado: implementada (Fase 1b y ajuste posterior).**

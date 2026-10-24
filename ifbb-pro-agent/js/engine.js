@@ -13,6 +13,11 @@
   const LB_PER_KG = 2.20462;
   const CM_PER_IN = 2.54;
 
+  // DEC-010: valores de reglas centralizados en knowledge.js (VALIDATOR_RULES).
+  const SESSION_SET_CAP = K.VALIDATOR_RULES.sessionSetCap.value;
+  const SET_EXEC_SEC = K.VALIDATOR_RULES.setExecutionSeconds.value;
+  const FUNCTIONAL_LABEL = 'Funcional';
+
   const round = (v, d = 0) => { const m = Math.pow(10, d); return Math.round(v * m) / m; };
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
@@ -357,6 +362,28 @@
     'squat_bilateral', 'bench_press', 'shoulder_press', 'hinge', 'row_barbell', 'vertical_pull',
   ]);
 
+  // DEC-010: campos de identidad y aporte de un ejercicio del catálogo.
+  // `bucket` = dónde vive (día, rotación, lesiones); `muscle` = primario real
+  // según la tabla de aporte (null si no suma volumen de hipertrofia).
+  function exerciseFields(ex, bucket) {
+    const c = K.EXERCISE_CONTRIBUTION[ex.id];
+    return {
+      exerciseId: ex.id, bucket, muscle: c.primary,
+      muscleLabel: c.primary ? K.MUSCLE_LABELS[c.primary] : FUNCTIONAL_LABEL,
+      secondary: c.secondary.slice(),
+    };
+  }
+  function makeEntry(ex, bucket, sets) {
+    const entry = Object.assign(exerciseFields(ex, bucket), {
+      name: ex.name, type: ex.type, pattern: ex.pattern || ex.name, unilateral: !!ex.unilateral, sets,
+      reps: `${ex.reps[0]}-${ex.reps[1]}`, rir: ex.type === 'compound' ? '2-3' : '1-2', rest: ex.type === 'compound' ? '2-3 min' : '60-90 s',
+    });
+    // DEC-011: un ejercicio que solo entra por una lesión declarada es una
+    // precaución heurística (E4), no una adaptación validada.
+    if (ex.injuryOnly) entry.injurySubstitute = { zone: ex.injuryOnly, evidence: 'E4' };
+    return entry;
+  }
+
   // DEC-006 (corregido): la "familia" de un ejercicio es su id de patrón
   // explícito del catálogo (knowledge.js), no el texto de su nombre. Antes
   // se agrupaba por palabras del nombre y eso mezclaba por error ejercicios
@@ -462,15 +489,20 @@
         let rest = sets - per * picks.length;
         const dayEntries = picks.map(ex => {
           const n = per + (rest-- > 0 ? 1 : 0);
-          return { muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: ex.name, type: ex.type, pattern: ex.pattern || ex.name, unilateral: !!ex.unilateral, sets: n, reps: `${ex.reps[0]}-${ex.reps[1]}`, rir: ex.type === 'compound' ? '2-3' : '1-2', rest: ex.type === 'compound' ? '2-3 min' : '60-90 s' };
+          return makeEntry(ex, mu, n);
         });
         dayEntries.forEach(e => exercises.push(e));
         // DEC-005 (aclarado): con la bandera activa, el ejercicio funcional
         // se SUMA después de los principales; nunca reemplaza el patrón
-        // bilateral pesado del día. Se financia quitándole series a un
-        // aislamiento del mismo grupo ese día (o, si no hay, al último
+        // bilateral pesado del día. Si el funcional aporta volumen al grupo
+        // (step-up, búlgara con mancuernas), se financia quitándole series a
+        // un aislamiento del mismo grupo ese día (o, si no hay, al último
         // ejercicio puesto), sin bajarlo de un piso de 2 series, para no
         // tocar el volumen semanal de DEC-001.
+        // DEC-010: si NO aporta volumen (paseo del granjero, primary null),
+        // el descuento sacaría volumen real de hipertrofia sin reemplazarlo:
+        // se agrega aparte, sin descontar de nadie. Cuenta en totalSets y en
+        // la duración, no en el volumen del grupo.
         if (extra.length) {
           const ridx = rotateExtra[mu] = (rotateExtra[mu] || 0);
           rotateExtra[mu] = ridx + 1;
@@ -486,23 +518,28 @@
           const bonus = (carry && isLastOccurrence) ? carry : (others.length ? others[ridx % others.length] : extra[ridx % extra.length]);
           const bonusPattern = bonus.pattern || bonus.name;
           const alreadyThere = exercises.some(e => (e.pattern || e.name) === bonusPattern);
-          // Donante: el pick de este músculo ese día con más series de sobra
-          // (prioriza aislamientos). Se prueba con 2 series y, si no entra,
-          // con 1, antes de rendirse por falta de espacio.
-          const isolationPicks = dayEntries.filter(e => e.type === 'isolation');
-          const nonEligibleCompounds = dayEntries.filter(e => e.type === 'compound' && !TOPSET_ELIGIBLE_PATTERNS.has(e.pattern));
-          const pool = isolationPicks.length ? isolationPicks : (nonEligibleCompounds.length ? nonEligibleCompounds : dayEntries);
-          const donor = pool.slice().sort((a, b) => b.sets - a.sets)[0];
-          let bonusSets = 0;
-          if (!alreadyThere && donor) {
-            if (donor.sets - 2 >= 2) bonusSets = 2;
-            else if (donor.sets - 1 >= 2) bonusSets = 1;
+          if (K.EXERCISE_CONTRIBUTION[bonus.id].primary === null) {
+            // Series desde la configuración (VALIDATOR_RULES.functionalNoVolumeExtraSets).
+            if (!alreadyThere) exercises.push(makeEntry(bonus, mu, K.VALIDATOR_RULES.functionalNoVolumeExtraSets.value));
+          } else {
+            // Donante: el pick de este músculo ese día con más series de sobra
+            // (prioriza aislamientos). Se prueba con 2 series y, si no entra,
+            // con 1, antes de rendirse por falta de espacio.
+            const isolationPicks = dayEntries.filter(e => e.type === 'isolation');
+            const nonEligibleCompounds = dayEntries.filter(e => e.type === 'compound' && !TOPSET_ELIGIBLE_PATTERNS.has(e.pattern));
+            const pool = isolationPicks.length ? isolationPicks : (nonEligibleCompounds.length ? nonEligibleCompounds : dayEntries);
+            const donor = pool.slice().sort((a, b) => b.sets - a.sets)[0];
+            let bonusSets = 0;
+            if (!alreadyThere && donor) {
+              if (donor.sets - 2 >= 2) bonusSets = 2;
+              else if (donor.sets - 1 >= 2) bonusSets = 1;
+            }
+            if (bonusSets > 0) {
+              donor.sets -= bonusSets;
+              exercises.push(makeEntry(bonus, mu, bonusSets));
+            }
+            // si no hay de dónde financiarlo ese día sin romper el piso, no se agrega esta vez
           }
-          if (bonusSets > 0) {
-            donor.sets -= bonusSets;
-            exercises.push({ muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: bonus.name, type: bonus.type, pattern: bonusPattern, unilateral: !!bonus.unilateral, sets: bonusSets, reps: `${bonus.reps[0]}-${bonus.reps[1]}`, rir: bonus.type === 'compound' ? '2-3' : '1-2', rest: bonus.type === 'compound' ? '2-3 min' : '60-90 s' });
-          }
-          // si no hay de dónde financiarlo ese día sin romper el piso, no se agrega esta vez
         }
       });
       return { name: d.name, exercises, totalSets: exercises.reduce((a, e) => a + e.sets, 0) };
@@ -542,7 +579,7 @@
         let rest = sets - per * picks.length;
         picks.forEach(ex => {
           const n = per + (rest-- > 0 ? 1 : 0);
-          s.exercises.push({ muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: ex.name, type: ex.type, pattern: ex.pattern || ex.name, unilateral: !!ex.unilateral, sets: n, reps: `${ex.reps[0]}-${ex.reps[1]}`, rir: ex.type === 'compound' ? '2-3' : '1-2', rest: ex.type === 'compound' ? '2-3 min' : '60-90 s' });
+          s.exercises.push(makeEntry(ex, mu, n));
           s.totalSets += n;
         });
       });
@@ -550,7 +587,6 @@
 
     // DEC-003 v2: aviso no bloqueante si un día se pasa de 25 series. No se
     // recorta ni se mueve nada automáticamente.
-    const SESSION_SET_CAP = 25;
     sessions.forEach(s => {
       if (s.totalSets > SESSION_SET_CAP) {
         trainingWarnings.push({ level: 'warn', text: `${s.name}: ${s.totalSets} series, por encima de las ${SESSION_SET_CAP} recomendadas por sesión. No se recorta nada automáticamente; si te resulta muy largo, movés vos algún aislamiento a otro día.` });
@@ -595,11 +631,11 @@
       s.exercises.forEach(e => {
         const unilateralFactor = e.unilateral ? 2 : 1;
         if (e.topSet) {
-          seconds += unilateralFactor * (1 * (180 + 45));
-          seconds += unilateralFactor * ((e.backoffSets || 0) * (150 + 45));
+          seconds += unilateralFactor * (1 * (180 + SET_EXEC_SEC));
+          seconds += unilateralFactor * ((e.backoffSets || 0) * (150 + SET_EXEC_SEC));
         } else {
           const rest = e.type === 'compound' ? 150 : 75;
-          seconds += unilateralFactor * (e.sets * (rest + 45));
+          seconds += unilateralFactor * (e.sets * (rest + SET_EXEC_SEC));
         }
       });
       s.durationMin = Math.round(seconds / 60);
@@ -665,23 +701,37 @@
       }
     }
 
-    // Capa 3 (lesiones): aviso de evaluación profesional cuando no hay
-    // diagnóstico. La exclusión de ejercicios (filterLibByInjuries) ya se
-    // aplicó en computeTraining; acá solo se arma el aviso y el resumen.
+    // Capa 3 (lesiones, DEC-011): no existe un marco validado para adaptar
+    // una rutina a una lesión desde una app. Con CUALQUIER zona declarada
+    // el plan queda en pausa hasta que el usuario confirme, zona por zona,
+    // que un profesional lo autorizó a entrenar (se guarda con fecha en
+    // `clearanceDate`). Recién entonces se muestra el plan, y la exclusión de
+    // ejercicios (filterLibByInjuries, ya aplicada en computeTraining) es solo
+    // una precaución heurística E4, nunca una adaptación a la lesión.
     const injuries = h.injuries || [];
     if (injuries.length) sources.push('SILBERNAGEL_2007');
+    const injuryLabel = zone => (K.INJURY_LABELS && K.INJURY_LABELS[zone]) || zone;
+    const pendingZones = injuries.filter(i => !i.clearanceDate).map(i => i.zone);
+    let injuryBlockReason = null;
+    if (pendingZones.length) {
+      blocked = true;
+      injuryBlockReason = `Declaraste una lesión (${pendingZones.map(injuryLabel).join(', ')}). La app no puede adaptar una rutina a una lesión: no existe un marco validado para hacerlo desde una app. Consultá a un médico o fisioterapeuta antes de entrenar y, cuando un profesional te haya autorizado a entrenar con esa lesión, confirmalo para ver el plan.`;
+    }
     injuries.forEach(inj => {
-      if (!inj.diagnosed) {
-        const label = (K.INJURY_LABELS && K.INJURY_LABELS[inj.zone]) || inj.zone;
-        warnings.push({ level: 'info', text: `${label}: te recomendamos una evaluación profesional; mientras tanto, se excluyen los ejercicios que suelen cargar esta zona.` });
-      }
+      const label = injuryLabel(inj.zone);
+      warnings.push({ level: 'info', evidence: 'E4', text: `${label}: como precaución (E4, heurística), el plan evita algunos ejercicios que suelen cargar esta zona. No es una adaptación de la rutina a tu lesión ni reemplaza la indicación de tu profesional.` });
+      if (!inj.diagnosed) warnings.push({ level: 'info', text: `${label}: te recomendamos una evaluación profesional.` });
     });
+    const injuryClearance = { required: injuries.length > 0, pendingZones, evidence: 'E4' };
 
     const anyCondition = h.screening.cvMetabolicRenal || h.screening.symptoms || h.diabetes.type !== 'none' || injuries.length > 0;
     return {
-      blocked, blockReason, medicalClearanceRecommended, diabetesWarning, weightLossMedWarning,
+      blocked, blockReason, injuryBlockReason, injuryClearance, medicalClearanceRecommended, diabetesWarning, weightLossMedWarning,
       injuries, anyCondition,
-      disclaimer: anyCondition ? 'Estas adaptaciones aplican posicionamientos científicos oficiales y no reemplazan la valoración de un médico, fisioterapeuta o entrenador certificado.' : null,
+      disclaimer: anyCondition
+        ? 'Estos avisos aplican posicionamientos científicos oficiales cuando existen y no reemplazan la valoración de un médico, fisioterapeuta o entrenador certificado.' +
+          (injuries.length ? ' Para lesiones la app no adapta la rutina: solo evita algunos ejercicios de la zona como precaución (E4) una vez que un profesional te autorizó a entrenar.' : '')
+        : null,
       warnings, sources: unique(sources),
     };
   }
@@ -723,7 +773,10 @@
     const zones = unique(toList(src.injuryZones).filter(z => validZones.indexOf(z) !== -1));
     const diagnosedSet = new Set(toList(src.injuryDiagnosed));
     const painSet = new Set(toList(src.injuryPainNow));
-    const injuries = zones.map(zone => ({ zone, diagnosed: diagnosedSet.has(zone), painNow: painSet.has(zone) }));
+    // clearanceDate: el formulario nunca la envía; la fija la pantalla de
+    // pausa al confirmar la autorización profesional y se conserva entre
+    // ediciones con carryOverInjuryClearances (DEC-011).
+    const injuries = zones.map(zone => ({ zone, diagnosed: diagnosedSet.has(zone), painNow: painSet.has(zone), clearanceDate: null }));
     const diabetesType = ['type1', 'type2'].indexOf(src.diabetesType) !== -1 ? src.diabetesType : 'none';
     return {
       screening: {
@@ -735,6 +788,140 @@
       diabetes: { type: diabetesType, medication: !!src.healthDiabetesMed },
       injuries,
     };
+  }
+
+  // DEC-011: al guardar el formulario se reconstruyen las lesiones desde los
+  // campos planos y la autorización de cada zona se perdería. Se conserva la
+  // fecha de las zonas que siguen declaradas; una zona nueva, o una que se
+  // quitó y se volvió a agregar, vuelve a pedirla.
+  function carryOverInjuryClearances(prevHealth, nextHealth) {
+    const prev = {};
+    ((prevHealth && prevHealth.injuries) || []).forEach(i => { if (i.clearanceDate) prev[i.zone] = i.clearanceDate; });
+    return Object.assign({}, nextHealth, {
+      injuries: (nextHealth.injuries || []).map(i => Object.assign({}, i, { clearanceDate: prev[i.zone] || i.clearanceDate || null })),
+    });
+  }
+
+  // DEC-011 (re-autorización): conserva la fecha de autorización de las zonas
+  // que siguen declaradas (carryOverInjuryClearances) y la INVALIDA en las que
+  // empeoraron respecto de lo guardado antes de editar: el dolor actual subió
+  // (de "sin dolor" a "con dolor") o el diagnóstico cambió (en cualquier
+  // sentido). Si el dolor baja o no cambia nada, la autorización se mantiene.
+  // Una zona invalidada vuelve a pasar por advertencia → derivación →
+  // confirmación fechada, el mismo flujo de la primera vez.
+  function reconcileInjuryClearances(prevHealth, nextHealth) {
+    const carried = carryOverInjuryClearances(prevHealth, nextHealth);
+    const was = {};
+    ((prevHealth && prevHealth.injuries) || []).forEach(i => { was[i.zone] = i; });
+    return Object.assign({}, carried, {
+      injuries: carried.injuries.map(i => {
+        const before = was[i.zone];
+        const worsened = !!before && ((!!i.painNow && !before.painNow) || !!i.diagnosed !== !!before.diagnosed);
+        // `clearanceInvalidated` marca las zonas que PERDIERON una autorización ya
+        // dada porque empeoraron (la pantalla de pausa lo explica, a diferencia de
+        // la primera autorización). Se mantiene mientras la zona siga sin confirmar.
+        // Solo existe la clave cuando vale true.
+        const reauth = worsened ? (!!before.clearanceDate || !!before.clearanceInvalidated) : (!!before && !!before.clearanceInvalidated && !i.clearanceDate);
+        const next = worsened ? Object.assign({}, i, { clearanceDate: null }) : i;
+        return reauth ? Object.assign({}, next, { clearanceInvalidated: true }) : next;
+      }),
+    });
+  }
+
+  // Zonas que hoy esperan una confirmación NUEVA porque empeoraron después de
+  // haber sido autorizadas (no las que nunca se autorizaron).
+  function zonesPendingReauthorization(health) {
+    return ((health && health.injuries) || []).filter(i => i.clearanceInvalidated && !i.clearanceDate).map(i => i.zone);
+  }
+
+  /* ---------- DEC-009 / DEC-011: dolor en Modo sesión ---------- */
+
+  const daysBetweenIso = (fromIso, toIso) => Math.round((Date.parse(toIso) - Date.parse(fromIso)) / 86400000);
+  const recentPainSessions = (rec, today) => ((rec && rec.painSessions) || []).filter(s => {
+    const age = daysBetweenIso(s.date, today);
+    return age >= 0 && age <= K.VALIDATOR_RULES.painAdviceWindowDays.value;
+  });
+
+  // Registra una lectura de dolor sobre el registro de un patrón y devuelve el
+  // registro nuevo (no muta el anterior). Conserva la regla de DEC-009 (dolor
+  // por encima del umbral marca; se desmarca con 2 sesiones DISTINTAS
+  // seguidas sin pasarse) y suma el historial de sesiones con dolor para el
+  // aviso de DEC-011.
+  function applyPainReading(rec, pain, sessionId, today) {
+    const prev = rec || {};
+    const next = { flagged: !!prev.flagged, cleanStreak: prev.cleanStreak || 0, lastSessionId: prev.lastSessionId || null, painSessions: (prev.painSessions || []).slice() };
+    const newSession = next.lastSessionId !== sessionId;
+    if (pain > K.VALIDATOR_RULES.painFlagThreshold.value) {
+      next.flagged = true; next.cleanStreak = 0;
+      if (!next.painSessions.some(s => s.sessionId === sessionId)) next.painSessions.push({ sessionId, date: today });
+    } else if (next.flagged && newSession) {
+      next.cleanStreak += 1;
+      if (next.cleanStreak >= 2) { next.flagged = false; next.cleanStreak = 0; }
+    }
+    next.lastSessionId = sessionId;
+    next.painSessions = recentPainSessions(next, today);
+    return next;
+  }
+
+  // DEC-011 (E4): ¿recomendar consultar a un profesional? Sí si el patrón
+  // tuvo dolor por encima del umbral en 2 o más sesiones DISTINTAS dentro de
+  // las últimas 4 semanas, no necesariamente seguidas. Independiente de si la
+  // marca de sustitución sigue activa.
+  function painProfessionalAdvice(rec, today) {
+    const sessions = recentPainSessions(rec, today).length;
+    return { advise: sessions >= K.VALIDATOR_RULES.painAdviceMinSessions.value, sessions, evidence: 'E4' };
+  }
+
+  /* ---------- DEC-009 (Privacidad): export e import sin datos de salud ---------- */
+
+  // Campos planos del formulario que normalizeHealth sabe leer: un archivo
+  // armado a mano o por otra versión podría traerlos en vez de `health`.
+  const HEALTH_FORM_FIELDS = ['healthRegularExercise', 'healthCvMetabolicRenal', 'healthSymptoms', 'healthMedicalClearance', 'healthDiabetesMed', 'diabetesType', 'injuryZones', 'injuryDiagnosed', 'injuryPainNow'];
+
+  function stripHealthFields(data) {
+    const copy = Object.assign({}, data);
+    delete copy.health;
+    HEALTH_FORM_FIELDS.forEach(k => { delete copy[k]; });
+    return copy;
+  }
+
+  function healthHasContent(h) {
+    const s = (h && h.screening) || {}, d = (h && h.diabetes) || {};
+    return !!(s.regularExercise || s.cvMetabolicRenal || s.symptoms || s.medicalClearance || (d.type && d.type !== 'none') || d.medication || ((h && h.injuries) || []).length);
+  }
+
+  // Copia del perfil lista para exportar: sin `health` (tamizaje, diabetes,
+  // lesiones y fechas de autorización por zona), sin `painFlags` y sin el
+  // dolor registrado en cada serie (`workouts[].pain`). No muta el original.
+  function exportProfile(profile) {
+    const out = {};
+    Object.keys(profile).forEach(k => { if (k !== 'painFlags') out[k] = profile[k]; });
+    out.data = stripHealthFields(profile.data || {});
+    if (Array.isArray(profile.workouts)) out.workouts = profile.workouts.map(w => { const c = Object.assign({}, w); delete c.pain; return c; });
+    return JSON.parse(JSON.stringify(out));
+  }
+
+  // Arma el perfil a guardar desde un item importado. Ignora (y no guarda)
+  // `health`, los campos planos de salud y `painFlags`, también en archivos
+  // exportados por la versión anterior que sí los incluían. `droppedHealth`
+  // avisa si el archivo traía algo de salud con contenido.
+  function prepareImportedProfile(item, today) {
+    const droppedHealth = healthHasContent(normalizeHealth(item.data)) || !!(item.painFlags && Object.keys(item.painFlags).length);
+    return {
+      createdAt: item.createdAt || today, updatedAt: today,
+      data: normalizeProfile(stripHealthFields(item.data)),
+      log: Array.isArray(item.log) ? item.log : [],
+      droppedHealth,
+    };
+  }
+
+  // Perfiles locales con lesiones declaradas que se parecen al que se va a
+  // importar (mismo id de exportación o mismo nombre). El import siempre crea
+  // un perfil NUEVO, así que no pisa nada, pero el nuevo queda sin lesiones y
+  // conviene avisarlo antes.
+  function localHealthConflicts(localProfiles, item) {
+    const name = ((item.data && item.data.name) || '').toString().trim();
+    return localProfiles.filter(p => (p.id === item.id || p.data.name === name) && ((p.data.health && p.data.health.injuries) || []).length > 0);
   }
 
   function normalizeProfile(src) {
@@ -781,5 +968,5 @@
 
   function unique(arr) { return arr.filter((v, i) => v && arr.indexOf(v) === i); }
 
-  return { bmrMifflin, bmrKatch, bodyFatNavy, ffmi, classicLimit, computeMetrics, computeTargets, computeNutrition, computeTraining, computeHealthScreen, buildPlan, normalizeProfile, validateProfile, SPLITS, LB_PER_KG };
+  return { bmrMifflin, bmrKatch, bodyFatNavy, ffmi, classicLimit, computeMetrics, computeTargets, computeNutrition, computeTraining, computeHealthScreen, buildPlan, normalizeProfile, validateProfile, exerciseFields, carryOverInjuryClearances, reconcileInjuryClearances, zonesPendingReauthorization, applyPainReading, painProfessionalAdvice, exportProfile, prepareImportedProfile, localHealthConflicts, SPLITS, LB_PER_KG };
 });

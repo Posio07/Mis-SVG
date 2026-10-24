@@ -81,6 +81,7 @@ const server = http.createServer((req, res) => {
   await shot('08-session-summary');
   const workouts = await page.evaluate(() => JSON.parse(localStorage.getItem('ifbb-agent:v1')).profiles[0].workouts);
   if (!workouts || workouts.length < 1 || workouts[0].reps !== 5 || workouts[0].weight !== 60) throw new Error('workout set not saved correctly: ' + JSON.stringify(workouts));
+  if (!/^[a-z]+\.[a-z_]+$/.test(workouts[0].exerciseId || '')) throw new Error('workout set saved without a stable exerciseId: ' + JSON.stringify(workouts[0]));
   await page.click('#sm-back-to-plan');
   await page.waitForSelector('#session-mode-root', { state: 'detached' });
   await page.waitForSelector('.subtabs');
@@ -145,6 +146,143 @@ const server = http.createServer((req, res) => {
   const srcCount = await page.$$eval('.source-item', e => e.length);
   if (srcCount < 15) throw new Error('sources missing');
   await shot('07-sources');
+
+  // DEC-011: lesión declarada → plan en pausa con advertencia y derivación →
+  // confirmación explícita por zona (con fecha) → al agregar otra zona solo se
+  // vuelve a pedir la nueva. Los textos nunca dicen "adaptado a la lesión".
+  await page.click('.tab[data-tab=profiles]');
+  await page.click('#btn-new');
+  await page.fill('input[name=name]', 'Lesión · Test');
+  await page.fill('input[name=age]', '35');
+  await page.fill('input[name=heightCm]', '178');
+  await page.fill('input[name=weightKg]', '85');
+  await page.fill('input[name=neckCm]', '40');
+  await page.fill('input[name=waistCm]', '88');
+  await page.check('input[name=injuryZones][value=shoulder]');
+  await page.click('button[type=submit]');
+  await page.waitForSelector('[data-injury-clearance="shoulder"]');
+  if (await page.$('.subtabs')) throw new Error('con una lesión sin confirmar el plan no debería mostrarse');
+  const pausa = await page.textContent('#view');
+  if (!/Plan en pausa/.test(pausa) || !/no puede adaptar una rutina a una lesión/.test(pausa) || !/Hombro/.test(pausa) || !/E4/.test(pausa)) throw new Error('la pausa por lesión no muestra advertencia + derivación + etiqueta E4: ' + pausa.slice(0, 400));
+  if (/adaptad[oa] a (tu|la) lesi/i.test(pausa)) throw new Error('un texto afirma que la rutina está adaptada a la lesión');
+  if (/Se pide de nuevo/.test(pausa)) throw new Error('la primera pausa por lesión no debe llevar la línea de re-autorización');
+  await page.click('[data-injury-clearance="shoulder"]');
+  await page.waitForSelector('.subtabs');
+  const clearedHealth = await page.evaluate(() => JSON.parse(localStorage.getItem('ifbb-agent:v1')).profiles.find(p => p.data.name === 'Lesión · Test').data.health);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(clearedHealth.injuries[0].clearanceDate || '')) throw new Error('la autorización no quedó guardada con fecha: ' + JSON.stringify(clearedHealth.injuries));
+  await page.click('[data-pt=training]');
+  const trainingTxt = await page.textContent('#plan-body');
+  if (!/E4/.test(trainingTxt)) throw new Error('el ejercicio sustituto por lesión no muestra la etiqueta E4');
+
+  // DEC-011 · dolor: con 2 sesiones distintas con dolor en las últimas 4 semanas
+  // sobre el press landmine, el Modo sesión reemplaza el ejercicio, avisa que
+  // consulte a un profesional (E4) y el reemplazo NO hereda la etiqueta de
+  // "ejercicio de precaución por lesión" del original.
+  await page.evaluate(() => {
+    const s = JSON.parse(localStorage.getItem('ifbb-agent:v1'));
+    const p = s.profiles.find(x => x.data.name === 'Lesión · Test');
+    const d = n => { const x = new Date(); x.setDate(x.getDate() - n); return x.toISOString().slice(0, 10); };
+    p.painFlags = { shoulder_press_safe: { flagged: true, cleanStreak: 0, lastSessionId: 'b', painSessions: [{ sessionId: 'a', date: d(10) }, { sessionId: 'b', date: d(2) }] } };
+    localStorage.setItem('ifbb-agent:v1', JSON.stringify(s));
+  });
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.click('.tab[data-tab=plan]');
+  await page.waitForSelector('.subtabs');
+  await page.click('[data-pt=training]');
+  const dayIdx = await page.$$eval('[data-toggle-day]', els => els.map(e => e.dataset.toggleDay));
+  let painStarted = false;
+  for (const i of dayIdx) {
+    const has = await page.evaluate(n => { const b = document.getElementById('day-body-' + n); return !!b && /Press landmine/.test(b.textContent); }, i);
+    if (!has) continue;
+    if (await page.getAttribute(`#day-body-${i}`, 'inert') !== null) { await page.click(`[data-toggle-day="${i}"]`); await page.waitForTimeout(400); }
+    await page.click(`#day-body-${i} [data-start-session]`); painStarted = true; break;
+  }
+  if (!painStarted) throw new Error('no se encontró un día con el press landmine para probar el aviso de dolor');
+  await page.waitForSelector('.session-mode');
+  for (let k = 0; k < 12; k++) {
+    if (/Reemplaza a/.test(await page.textContent('.session-mode-body'))) break;
+    if (await page.$('#sm-next')) await page.click('#sm-next'); else break;
+  }
+  const painBody = await page.textContent('.session-mode-body');
+  if (!/Reemplaza a "Press landmine/.test(painBody)) throw new Error('el ejercicio marcado por dolor no se reemplazó');
+  if (!/en 2 sesiones distintas de las últimas 4 semanas/.test(painBody) || !/consultar a un profesional/.test(painBody)) throw new Error('falta el aviso de consultar a un profesional tras 2 sesiones con dolor');
+  if (/Ejercicio incluido como precaución/.test(painBody)) throw new Error('el reemplazo heredó la etiqueta de precaución por lesión del ejercicio original');
+  page.once('dialog', d => d.accept());
+  await page.click('#sm-close');
+  await page.waitForSelector('#session-mode-root', { state: 'detached' });
+  await page.click('.tab[data-tab=profiles]');
+  await page.click('#btn-edit');
+  await page.check('input[name=injuryZones][value=knee]');
+  await page.click('button[type=submit]');
+  await page.waitForSelector('[data-injury-clearance="knee"]');
+  if (await page.$('[data-injury-clearance="shoulder"]')) throw new Error('al agregar una zona no debería volver a pedirse la ya confirmada');
+  if (/Se pide de nuevo/.test(await page.textContent('#view'))) throw new Error('una zona NUEVA es una primera autorización: no lleva la línea de re-autorización');
+  const afterAdd = await page.evaluate(() => JSON.parse(localStorage.getItem('ifbb-agent:v1')).profiles.find(p => p.data.name === 'Lesión · Test').data.health.injuries);
+  if (afterAdd.find(i => i.zone === 'shoulder').clearanceDate !== clearedHealth.injuries[0].clearanceDate) throw new Error('se perdió la fecha de la zona ya confirmada');
+
+  // DEC-011 (ajuste) · re-autorización en navegador: si sube el dolor de una zona
+  // se invalida SOLO esa autorización y el plan se pausa con el mismo flujo; si el
+  // dolor baja no se pide nada; un cambio de diagnóstico también pausa.
+  const injuriesOf = () => page.evaluate(() => JSON.parse(localStorage.getItem('ifbb-agent:v1')).profiles.find(p => p.data.name === 'Lesión · Test').data.health.injuries);
+  const editInjuries = async (fn) => { await page.click('.tab[data-tab=profiles]'); await page.click('#btn-edit'); await fn(); await page.click('button[type=submit]'); };
+  await page.click('[data-injury-clearance="knee"]');
+  await page.waitForSelector('.subtabs');
+  const authorized = await injuriesOf();
+  if (authorized.some(i => !i.clearanceDate)) throw new Error('las dos zonas deberían estar autorizadas: ' + JSON.stringify(authorized));
+  await editInjuries(() => page.check('input[name=injuryPainNow][value=shoulder]')); // sube el dolor del hombro
+  await page.waitForSelector('[data-injury-clearance="shoulder"]');
+  if (await page.$('.subtabs')) throw new Error('subir el dolor de una zona autorizada debería pausar el plan');
+  if (await page.$('[data-injury-clearance="knee"]')) throw new Error('la rodilla no empeoró: no debería volver a pedirse');
+  // La línea explica el motivo, nombra solo la zona que empeoró y va ARRIBA del texto de siempre.
+  const pausaDolor = await page.textContent('#view');
+  const lineaReauth = pausaDolor.match(/Se pide de nuevo porque registraste dolor o cambiaste el diagnóstico en ([^.]*)\./);
+  if (!lineaReauth || lineaReauth[1] !== 'Hombro') throw new Error('la pausa por subida de dolor debería explicar el motivo y nombrar solo el Hombro: ' + (lineaReauth ? lineaReauth[1] : pausaDolor.slice(0, 300)));
+  if (pausaDolor.indexOf('Se pide de nuevo') > pausaDolor.indexOf('Declaraste una lesión')) throw new Error('la línea de re-autorización debe ir arriba del texto actual');
+  const afterPainUp = await injuriesOf();
+  if (afterPainUp.find(i => i.zone === 'shoulder').clearanceDate !== null || afterPainUp.find(i => i.zone === 'knee').clearanceDate !== authorized.find(i => i.zone === 'knee').clearanceDate) throw new Error('la invalidación debería ser solo de la zona que empeoró: ' + JSON.stringify(afterPainUp));
+  await page.click('[data-injury-clearance="shoulder"]');
+  await page.waitForSelector('.subtabs');
+  await editInjuries(() => page.uncheck('input[name=injuryPainNow][value=shoulder]')); // baja el dolor del hombro
+  await page.waitForSelector('.subtabs');
+  if (await page.$('[data-injury-clearance]')) throw new Error('bajar el dolor no debería pedir ninguna autorización');
+  await editInjuries(() => page.check('input[name=injuryDiagnosed][value=knee]')); // cambia el diagnóstico de la rodilla
+  await page.waitForSelector('[data-injury-clearance="knee"]');
+  if (await page.$('[data-injury-clearance="shoulder"]') || await page.$('.subtabs')) throw new Error('un cambio de diagnóstico debería pausar el plan solo por esa zona');
+  const pausaDiag = (await page.textContent('#view')).match(/Se pide de nuevo porque registraste dolor o cambiaste el diagnóstico en ([^.]*)\./);
+  if (!pausaDiag || pausaDiag[1] !== 'Rodilla') throw new Error('la pausa por cambio de diagnóstico debería nombrar solo la Rodilla: ' + (pausaDiag && pausaDiag[1]));
+  await page.click('[data-injury-clearance="knee"]');
+  await page.waitForSelector('.subtabs');
+  const afterReconfirm = await injuriesOf();
+  if (afterReconfirm.some(i => 'clearanceInvalidated' in i)) throw new Error('al confirmar se debe apagar la marca de re-autorización: ' + JSON.stringify(afterReconfirm));
+
+  // DEC-009 (privacidad) en navegador: el export descargado no trae datos de
+  // salud; importar un archivo viejo (con health y painFlags) los ignora, y si ya
+  // hay un perfil local con lesiones se avisa antes (cancelar no importa nada).
+  const healthKeys = /"(health|painFlags|painNow|painSessions|clearanceDate|injuries|screening|diabetes)":/;
+  await page.click('.tab[data-tab=profiles]');
+  const [download] = await Promise.all([page.waitForEvent('download'), page.click('#btn-export')]);
+  const exportedText = fs.readFileSync(await download.path(), 'utf8');
+  if (healthKeys.test(exportedText)) throw new Error('el export descargado incluye datos de salud: ' + exportedText.match(healthKeys)[0]);
+  if (JSON.parse(exportedText).data.name !== 'Lesión · Test') throw new Error('el export no es del perfil activo');
+  const legacyPath = path.join(shots, 'legacy-export.json');
+  const localProfile = await page.evaluate(() => JSON.parse(localStorage.getItem('ifbb-agent:v1')).profiles.find(p => p.data.name === 'Lesión · Test'));
+  if (!localProfile.data.health.injuries.length) throw new Error('el perfil local de prueba debería tener lesiones');
+  fs.writeFileSync(legacyPath, JSON.stringify(Object.assign({}, localProfile, { painFlags: { shoulder_press_safe: { flagged: true, cleanStreak: 0, lastSessionId: 'x', painSessions: [] } } })));
+  const countProfiles = () => page.evaluate(() => JSON.parse(localStorage.getItem('ifbb-agent:v1')).profiles.length);
+  const before = await countProfiles();
+  let warned = '';
+  page.once('dialog', d => { warned = d.message(); d.dismiss(); });
+  await page.setInputFiles('#file-import', legacyPath);
+  await page.waitForFunction(() => /Importación cancelada/.test(document.body.textContent));
+  if (!/Ya tenés un perfil .* con lesiones declaradas/.test(warned) || !/NUEVO sin lesiones/.test(warned)) throw new Error('falta la advertencia antes de importar sobre un perfil con lesiones: ' + warned);
+  if (await countProfiles() !== before) throw new Error('cancelar la advertencia no debería importar nada');
+  page.once('dialog', d => d.accept());
+  await page.setInputFiles('#file-import', legacyPath);
+  await page.waitForFunction(n => JSON.parse(localStorage.getItem('ifbb-agent:v1')).profiles.length === n, before + 1);
+  const afterImport = await page.evaluate(() => JSON.parse(localStorage.getItem('ifbb-agent:v1')).profiles);
+  const imported = afterImport[afterImport.length - 1];
+  if (imported.data.health.injuries.length || imported.painFlags || imported.data.health.screening.symptoms) throw new Error('el import guardó datos de salud del archivo: ' + JSON.stringify(imported.data.health));
+  if (!afterImport.find(p => p.id === localProfile.id).data.health.injuries.length) throw new Error('el import borró las lesiones del perfil local');
 
   // Service worker registrado y manifest válido
   const sw = await page.evaluate(async () => { const r = await navigator.serviceWorker.getRegistration(); return !!r; });

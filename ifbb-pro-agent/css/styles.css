@@ -321,3 +321,6 @@ li { margin-bottom: .25rem; }
 .topset-cmp.cmp-down { color: var(--peligro); }
 .topset-cmp.cmp-flat { color: var(--acero); }
 
+
+/* DEC-011: etiqueta de nivel de evidencia (E4 · heurística) junto a avisos y ejercicios de precaución */
+.ev-tag { display: inline-block; font-size: .68rem; padding: .05rem .4rem; border-radius: 6px; margin-left: .3rem; vertical-align: middle; border: 1px solid var(--acero); color: var(--acero); font-weight: 700; white-space: nowrap; }

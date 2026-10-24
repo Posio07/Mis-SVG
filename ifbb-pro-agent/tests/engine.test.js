@@ -456,3 +456,589 @@ function stripHealthNoise(obj) {
   delete c.warnings;
   return c;
 }
+
+/* ---------- DEC-010: aporte de volumen por ejercicio ---------- */
+
+const MUSCLE_IDS = Object.keys(K.MUSCLE_LABELS);
+const catalogEntries = () => []
+  .concat(...Object.entries(K.EXERCISES).map(([bucket, list]) => list.map(entry => ({ entry, bucket, functional: false }))))
+  .concat(...Object.entries(K.FUNCTIONAL_EXERCISES).map(([bucket, list]) => list.map(entry => ({ entry, bucket, functional: true }))));
+
+test('DEC-010: cada entrada del catálogo tiene id único y una fila en la tabla de aporte (y no sobran filas)', () => {
+  const entries = catalogEntries();
+  const ids = entries.map(x => x.entry.id);
+  assert.ok(ids.every(id => typeof id === 'string' && id.length > 0), 'toda entrada necesita id');
+  assert.equal(new Set(ids).size, ids.length, 'ids repetidos en el catálogo');
+  ids.forEach(id => assert.ok(K.EXERCISE_CONTRIBUTION[id], `falta fila de aporte para ${id}`));
+  assert.deepEqual(Object.keys(K.EXERCISE_CONTRIBUTION).sort(), ids.slice().sort(), 'la tabla tiene filas sin ejercicio (o al revés)');
+  // `pattern` NO sirve de id: se repite con primarios distintos.
+  const patterns = entries.map(x => x.entry.pattern);
+  assert.ok(new Set(patterns).size < patterns.length, 'si pattern fuera único no haría falta id');
+});
+
+test('DEC-010: la tabla usa solo los 10 grupos, el secundario no repite al primario y toda fila es E4', () => {
+  Object.entries(K.EXERCISE_CONTRIBUTION).forEach(([id, c]) => {
+    assert.ok(c.primary === null || MUSCLE_IDS.includes(c.primary), `${id}: primario inválido`);
+    assert.ok(Array.isArray(c.secondary), `${id}: secondary debe ser lista`);
+    c.secondary.forEach(m => assert.ok(MUSCLE_IDS.includes(m), `${id}: secundario inválido ${m}`));
+    assert.equal(new Set(c.secondary).size, c.secondary.length, `${id}: secundarios repetidos`);
+    assert.ok(!c.secondary.includes(c.primary), `${id}: el secundario repite al primario`);
+    assert.equal(c.evidence, 'E4', `${id}: toda la tabla va E4 hasta validarla`);
+  });
+});
+
+test('DEC-010: correcciones aprobadas de la tabla de aporte', () => {
+  const C = K.EXERCISE_CONTRIBUTION;
+  assert.ok(!C['quads.squat_back_or_hack'].secondary.includes('abs'), 'sentadilla sin abs');
+  assert.ok(!C['hamstrings.rdl'].secondary.includes('back'), 'peso muerto rumano sin back');
+  assert.ok(!C['shoulders.press_overhead'].secondary.includes('chest'), 'press militar sin chest');
+  assert.ok(!C['shoulders.press_landmine_neutral'].secondary.includes('chest'), 'press landmine sin chest');
+  assert.ok(!C['glutes.kickback_cable'].secondary.includes('hamstrings'), 'patada de glúteo sin isquios');
+  assert.deepEqual(C['glutes.hip_thrust'].secondary, ['hamstrings']);
+  assert.equal(C['glutes.hip_thrust'].status, 'a_verificar', 'hip thrust → isquios queda marcado a verificar');
+  assert.equal(C['functional.farmer_carry'].primary, null, 'paseo del granjero sin primario');
+  assert.deepEqual(C['functional.farmer_carry'].secondary, [], 'paseo del granjero sin secundarios (ni abs)');
+});
+
+test('DEC-010: los nombres del catálogo son únicos (el historial viejo se mapea a exerciseId por nombre)', () => {
+  const names = catalogEntries().map(x => x.entry.name);
+  assert.equal(new Set(names).size, names.length);
+  catalogEntries().forEach(x => assert.equal(K.EXERCISE_ID_BY_NAME[x.entry.name], x.entry.id));
+  assert.equal(K.EXERCISE_INDEX['glutes.bulgarian_hip'].bucket, 'glutes');
+});
+
+test('DEC-010: reglas centralizadas con valor, nivel, fuente y fecha de revisión', () => {
+  const R = K.VALIDATOR_RULES;
+  Object.entries(R).forEach(([key, r]) => {
+    assert.ok(r.value !== undefined, `${key}: sin valor`);
+    assert.ok(['E1', 'E2', 'E3', 'E4'].includes(r.level), `${key}: nivel inválido`);
+    assert.ok(r.source === null || (r.source.label && r.source.url), `${key}: fuente mal formada`);
+    assert.match(r.reviewedAt, /^\d{4}-\d{2}-\d{2}$/, `${key}: fecha de revisión`);
+    assert.equal(r.verifiedAgainstPrimarySource, false, `${key}: nada está verificado contra la fuente primaria todavía`);
+  });
+  assert.equal(R.sessionSetCap.value, 25);
+  assert.equal(R.sessionSetCap.level, 'E4');
+  assert.equal(R.sessionSetCap.source, null);
+  assert.equal(R.sessionSetCap.reviewRequired, true);
+  assert.equal(R.setExecutionSeconds.value, 45);
+  assert.equal(R.setExecutionSeconds.assumption, true);
+  assert.equal(R.secondaryMuscleWeight.value, 0.5);
+  assert.equal(R.maxFractionalSetsPerMuscleSession.value, 11);
+});
+
+// Rutas (con "#" por cada índice de lista) en las que dos objetos difieren. Una
+// clave agregada, quitada o con otro valor, o una lista de otro largo, cuenta.
+function diffPaths(a, b, path, out) {
+  if (a && b && typeof a === 'object' && typeof b === 'object') {
+    if (Array.isArray(a) !== Array.isArray(b)) { out.add(path); return out; }
+    if (Array.isArray(a)) {
+      if (a.length !== b.length) { out.add(path + '.length'); return out; }
+      a.forEach((x, i) => diffPaths(x, b[i], path + '.#', out));
+      return out;
+    }
+    new Set(Object.keys(a).concat(Object.keys(b))).forEach(k => diffPaths(a[k], b[k], path + '.' + k, out));
+  } else if (!Object.is(a, b)) out.add(path);
+  return out;
+}
+
+test('el detector de diferencias del test de identidad ve claves agregadas, quitadas, cambiadas, null vs ausente y listas de otro largo', () => {
+  const d = (a, b) => [...diffPaths(a, b, 'x', new Set())].sort();
+  assert.deepEqual(d({ a: 1 }, { a: 1 }), []);
+  assert.deepEqual(d({ a: 1, nueva: 2 }, { a: 1 }), ['x.nueva']);
+  assert.deepEqual(d({ a: 1 }, { a: 1, vieja: 2 }), ['x.vieja']);
+  assert.deepEqual(d({ a: 1 }, { a: 2 }), ['x.a']);
+  assert.deepEqual(d({ a: null }, {}), ['x.a']);
+  assert.deepEqual(d({ l: [1, 2] }, { l: [1] }), ['x.l.length']);
+  assert.deepEqual(d({ l: [{ k: 1 }, { k: 2 }] }, { l: [{ k: 1 }, { k: 3 }] }), ['x.l.#.k']);
+  assert.deepEqual(d({ l: [] }, { l: {} }), ['x.l']);
+});
+
+test('DEC-010: perfiles sin healthGoal ni lesiones generan el mismo plan que antes; solo pueden diferir las rutas de la lista blanca', () => {
+  const fx = require('./fixtures/plan-identity-baseline.json');
+  // Lista blanca EXPLÍCITA de lo que puede diferir de la línea base (capturada con el
+  // motor anterior a DEC-010). Cualquier ruta nueva, quitada o cambiada que no esté acá
+  // hace fallar el test: al agregar una clave al plan hay que decidirlo y listarla.
+  const ALLOWED_DIFFS = {
+    'plan.training.sessions.#.exercises.#.exerciseId': 'DEC-010: id estable por ejercicio',
+    'plan.training.sessions.#.exercises.#.bucket': 'DEC-010: dónde vive el ejercicio',
+    'plan.training.sessions.#.exercises.#.secondary': 'DEC-010: músculos secundarios (peso 0.5)',
+    'plan.health.injuryBlockReason': 'DEC-011: texto de la pausa por lesión (null sin lesiones)',
+    'plan.health.injuryClearance': 'DEC-011: zonas pendientes de autorización (vacío sin lesiones)',
+  };
+  assert.ok(Object.keys(fx.cases).length >= 10);
+  const seen = new Set();
+  Object.entries(fx.cases).forEach(([key, c]) => {
+    assert.ok(!c.profile.healthGoal && !c.profile.injuryZones, `${key}: el fixture solo cubre perfiles sin healthGoal ni lesiones`);
+    const plan = E.buildPlan(c.profile, fx.today);
+    diffPaths(plan, c.plan, 'plan', seen);
+    // Las claves permitidas valen "sin efecto" en estos perfiles: nunca pausan ni tocan nada.
+    assert.equal(plan.health.injuryBlockReason, null, `${key}`);
+    assert.deepEqual(plan.health.injuryClearance, { required: false, pendingZones: [], evidence: 'E4' }, `${key}`);
+    assert.equal(plan.health.blocked, false, `${key}`);
+  });
+  const unexpected = [...seen].filter(p => !(p in ALLOWED_DIFFS)).sort();
+  assert.deepEqual(unexpected, [], `rutas que difieren de la línea base y NO están en la lista blanca: ${unexpected.join(', ')}`);
+  // La lista blanca no puede quedar vieja: cada ruta listada tiene que diferir de verdad.
+  const stale = Object.keys(ALLOWED_DIFFS).filter(p => !seen.has(p)).sort();
+  assert.deepEqual(stale, [], `rutas de la lista blanca que ya no difieren (quitarlas): ${stale.join(', ')}`);
+});
+
+test('DEC-010: bucket dice dónde vive y muscle es el primario real; coinciden salvo ejercicios sin aporte', () => {
+  const plan = E.buildPlan(Object.assign({}, male, { healthGoal: true }), TODAY);
+  const all = plan.training.sessions.flatMap(s => s.exercises);
+  all.forEach(e => {
+    assert.ok(e.exerciseId && K.EXERCISE_INDEX[e.exerciseId], `ejercicio sin exerciseId válido: ${e.name}`);
+    assert.equal(e.bucket, K.EXERCISE_INDEX[e.exerciseId].bucket);
+    assert.equal(e.muscle, K.EXERCISE_CONTRIBUTION[e.exerciseId].primary);
+    assert.deepEqual(e.secondary, K.EXERCISE_CONTRIBUTION[e.exerciseId].secondary);
+    if (e.muscle !== null) assert.equal(e.muscle, e.bucket);
+  });
+});
+
+test('DEC-010 / DEC-005: el paseo del granjero se agrega aparte, sin descontar series y sin aportar volumen', () => {
+  const profiles = [male, Object.assign({}, male, { daysPerWeek: 4 }), Object.assign({}, male, { daysPerWeek: 3, goal: 'maintain' }), Object.assign({}, male, { daysPerWeek: 6, goal: 'bulk' })];
+  const exec = K.VALIDATOR_RULES.setExecutionSeconds.value;
+  let carries = 0;
+  profiles.forEach(p => {
+    const plan = E.buildPlan(Object.assign({}, p, { healthGoal: true }), TODAY);
+    const all = plan.training.sessions.flatMap(s => s.exercises);
+    const carry = all.filter(e => e.exerciseId === 'functional.farmer_carry');
+    carries += carry.length;
+    carry.forEach(e => {
+      assert.equal(e.muscle, null);
+      assert.equal(e.muscleLabel, 'Funcional');
+      assert.equal(e.bucket, 'quads');
+      assert.equal(e.sets, 2);
+      assert.deepEqual(e.secondary, []);
+    });
+    // El volumen de hipertrofia de cada grupo sigue siendo exactamente el semanal.
+    Object.keys(plan.training.weeklySets).forEach(mu => {
+      const assigned = all.filter(e => e.muscle === mu).reduce((a, e) => a + e.sets, 0);
+      assert.equal(assigned, plan.training.weeklySets[mu], `${mu}: el volumen asignado cambió (${assigned} vs ${plan.training.weeklySets[mu]})`);
+    });
+    // totalSets y duración incluyen las series del paseo.
+    plan.training.sessions.forEach(s => {
+      assert.equal(s.totalSets, s.exercises.reduce((a, e) => a + e.sets, 0));
+      let seconds = 0;
+      s.exercises.forEach(e => {
+        const uf = e.unilateral ? 2 : 1;
+        if (e.topSet) seconds += uf * (180 + exec) + uf * ((e.backoffSets || 0) * (150 + exec));
+        else seconds += uf * (e.sets * ((e.type === 'compound' ? 150 : 75) + exec));
+      });
+      assert.equal(s.durationMin, Math.round(seconds / 60));
+    });
+  });
+  assert.ok(carries >= 3, 'el paseo del granjero debería aparecer en los planes con healthGoal');
+});
+
+/* ---------- DEC-011: lesiones (autorización profesional) y aviso por dolor ---------- */
+
+const withInjury = (zones, extra) => Object.assign({}, male, { injuryZones: zones }, extra || {});
+const cleared = (health, zone, date) => { const h = JSON.parse(JSON.stringify(health)); h.injuries.find(i => i.zone === zone).clearanceDate = date; return h; };
+
+test('DEC-011: cualquier zona declarada pausa el plan hasta confirmar la autorización profesional', () => {
+  const plan = E.buildPlan(withInjury(['shoulder']), TODAY);
+  assert.equal(plan.health.blocked, true);
+  assert.deepEqual(plan.health.injuryClearance, { required: true, pendingZones: ['shoulder'], evidence: 'E4' });
+  assert.match(plan.health.injuryBlockReason, /Hombro/);
+  assert.match(plan.health.injuryBlockReason, /no puede adaptar una rutina a una lesión/);
+  assert.match(plan.health.injuryBlockReason, /profesional te haya autorizado/);
+  assert.equal(plan.health.blockReason, null, 'sin síntomas ni condición CV, la pausa es solo por la lesión');
+  // También con diagnóstico y también sin dolor: aplica a cualquier zona declarada.
+  const diagnosed = E.buildPlan(withInjury(['knee'], { injuryDiagnosed: ['knee'] }), TODAY);
+  assert.equal(diagnosed.health.blocked, true);
+  assert.deepEqual(diagnosed.health.injuryClearance.pendingZones, ['knee']);
+});
+
+test('DEC-011: la confirmación es por zona y se guarda con fecha; con todas confirmadas el plan se muestra', () => {
+  const base = E.normalizeProfile(withInjury(['shoulder', 'knee']));
+  const one = Object.assign({}, base, { health: cleared(base.health, 'shoulder', '2026-09-10') });
+  const planOne = E.buildPlan(one, TODAY);
+  assert.equal(planOne.health.blocked, true);
+  assert.deepEqual(planOne.health.injuryClearance.pendingZones, ['knee'], 'solo falta la zona sin confirmar');
+  assert.doesNotMatch(planOne.health.injuryBlockReason, /Hombro/);
+  const both = Object.assign({}, one, { health: cleared(one.health, 'knee', '2026-09-11') });
+  const planBoth = E.buildPlan(both, TODAY);
+  assert.equal(planBoth.health.blocked, false);
+  assert.equal(planBoth.health.injuryBlockReason, null);
+  assert.deepEqual(planBoth.health.injuryClearance.pendingZones, []);
+  assert.equal(planBoth.health.injuries.find(i => i.zone === 'shoulder').clearanceDate, '2026-09-10');
+  // El plan se calcula igual esté pausado o no (la UI decide no mostrarlo).
+  assert.deepEqual(planBoth.training.sessions, E.buildPlan(withInjury(['shoulder', 'knee']), TODAY).training.sessions);
+});
+
+test('DEC-011: lesión y síntomas a la vez muestran las dos causas de pausa', () => {
+  const plan = E.buildPlan(withInjury(['shoulder'], { healthSymptoms: 'on' }), TODAY);
+  assert.equal(plan.health.blocked, true);
+  assert.ok(plan.health.blockReason && plan.health.injuryBlockReason);
+});
+
+test('DEC-011: la autorización se conserva entre ediciones solo en las zonas que siguen declaradas', () => {
+  const stored = E.normalizeProfile(withInjury(['shoulder', 'knee']));
+  stored.health = cleared(cleared(stored.health, 'shoulder', '2026-09-10'), 'knee', '2026-09-11');
+  // El formulario nunca envía clearanceDate: la edición produce null y se reinyecta lo guardado.
+  const edited = E.normalizeProfile(withInjury(['shoulder', 'knee'], { injuryPainNow: ['shoulder'], injuryDiagnosed: ['knee'] }));
+  assert.ok(edited.health.injuries.every(i => i.clearanceDate === null));
+  const kept = E.carryOverInjuryClearances(stored.health, edited.health);
+  assert.deepEqual(kept.injuries.map(i => [i.zone, i.clearanceDate]), [['shoulder', '2026-09-10'], ['knee', '2026-09-11']], 'cambiar diagnóstico o dolor no vuelve a pedirla');
+  assert.equal(kept.injuries[0].painNow, true);
+  // Se agrega una zona: solo esa vuelve a pedirse.
+  const added = E.carryOverInjuryClearances(stored.health, E.normalizeProfile(withInjury(['shoulder', 'knee', 'ankle'])).health);
+  assert.deepEqual(added.injuries.map(i => [i.zone, i.clearanceDate]), [['shoulder', '2026-09-10'], ['knee', '2026-09-11'], ['ankle', null]]);
+  // Se quita una zona y después se vuelve a agregar: pierde la fecha y se vuelve a pedir.
+  const removed = E.carryOverInjuryClearances(stored.health, E.normalizeProfile(withInjury(['shoulder'])).health);
+  assert.deepEqual(removed.injuries.map(i => [i.zone, i.clearanceDate]), [['shoulder', '2026-09-10']]);
+  const readded = E.carryOverInjuryClearances(removed, E.normalizeProfile(withInjury(['shoulder', 'knee'])).health);
+  assert.equal(readded.injuries.find(i => i.zone === 'knee').clearanceDate, null);
+  // Re-normalizar un perfil ya guardado no pierde las fechas.
+  assert.deepEqual(E.normalizeProfile(stored).health.injuries.map(i => i.clearanceDate), ['2026-09-10', '2026-09-11']);
+  // Sin datos previos no inventa fechas.
+  assert.equal(E.carryOverInjuryClearances(undefined, edited.health).injuries[0].clearanceDate, null);
+});
+
+test('DEC-011: ningún texto del motor ni de la interfaz dice que la rutina está adaptada a la lesión; todo es precaución E4', () => {
+  const fs = require('node:fs');
+  const planPending = E.buildPlan(withInjury(['shoulder', 'knee'], { injuryDiagnosed: ['knee'] }), TODAY);
+  const planOk = E.buildPlan(Object.assign({}, E.normalizeProfile(withInjury(['shoulder'])), { health: cleared(E.normalizeProfile(withInjury(['shoulder'])).health, 'shoulder', '2026-09-10') }), TODAY);
+  const texts = [planPending.health.injuryBlockReason, planPending.health.disclaimer, planOk.health.disclaimer]
+    .concat(planPending.warnings.map(w => w.text), planOk.warnings.map(w => w.text));
+  const claim = /adaptad[oa]s? a (tu|la) lesi[oó]n|(plan|rutina) (est[aá] |queda )?adaptad[oa]|(?<!no )adapta(mos)? (el plan|la rutina)|adaptaciones aplican|se excluyen los ejercicios|igual se excluyen/i;
+  texts.forEach(t => assert.doesNotMatch(t, claim, `texto con afirmación de adaptación: ${t}`));
+  // Las precauciones por zona llevan la etiqueta E4 en el dato (la UI la dibuja).
+  const precautions = planOk.warnings.filter(w => /precaución/.test(w.text));
+  assert.equal(precautions.length, 1);
+  assert.equal(precautions[0].evidence, 'E4');
+  assert.match(planOk.health.disclaimer, /E4/);
+  assert.match(planOk.health.disclaimer, /no adapta la rutina/);
+  // Mismo criterio sobre el código fuente de la interfaz y del motor.
+  ['../js/app.js', '../js/engine.js'].forEach(rel => {
+    const src = fs.readFileSync(require('node:path').join(__dirname, rel), 'utf8');
+    assert.doesNotMatch(src, claim, `${rel}: quedó un texto que afirma adaptación a la lesión`);
+  });
+});
+
+test('DEC-011: el sustituto por lesión (shoulder_press_safe) y las exclusiones se etiquetan E4; sin lesión no hay etiqueta', () => {
+  const injured = E.buildPlan(withInjury(['shoulder']), TODAY).training.sessions.flatMap(s => s.exercises);
+  const subs = injured.filter(e => e.injurySubstitute);
+  assert.ok(subs.length >= 1);
+  subs.forEach(e => { assert.equal(e.pattern, 'shoulder_press_safe'); assert.deepEqual(e.injurySubstitute, { zone: 'shoulder', evidence: 'E4' }); });
+  const clean = E.buildPlan(male, TODAY).training.sessions.flatMap(s => s.exercises);
+  assert.ok(clean.every(e => !('injurySubstitute' in e)));
+});
+
+test('DEC-011: aviso de consultar a un profesional con 2 sesiones distintas con dolor >5 en las últimas 4 semanas', () => {
+  const R = K.VALIDATOR_RULES;
+  assert.equal(R.painFlagThreshold.value, 5);
+  assert.equal(R.painAdviceMinSessions.value, 2);
+  assert.equal(R.painAdviceWindowDays.value, 28);
+  ['painFlagThreshold', 'painAdviceMinSessions', 'painAdviceWindowDays'].forEach(k => assert.equal(R[k].level, 'E4'));
+
+  let rec = E.applyPainReading(undefined, 7, 'S1', '2026-09-01');
+  assert.equal(rec.flagged, true);
+  assert.equal(E.painProfessionalAdvice(rec, '2026-09-01').advise, false, 'una sola sesión no alcanza');
+  rec = E.applyPainReading(rec, 8, 'S1', '2026-09-01'); // otra serie de la MISMA sesión
+  assert.equal(rec.painSessions.length, 1, 'dos series de la misma sesión cuentan una vez');
+  assert.equal(E.painProfessionalAdvice(rec, '2026-09-01').advise, false);
+  // Una sesión intermedia sin dolor no corta la cuenta: no tienen que ser seguidas.
+  rec = E.applyPainReading(rec, 2, 'S2', '2026-09-05');
+  rec = E.applyPainReading(rec, 6, 'S3', '2026-09-09');
+  const advice = E.painProfessionalAdvice(rec, '2026-09-09');
+  assert.equal(advice.advise, true);
+  assert.equal(advice.sessions, 2);
+  assert.equal(advice.evidence, 'E4');
+  // Dolor igual al umbral (5) no cuenta: tiene que superarlo.
+  assert.equal(E.painProfessionalAdvice(E.applyPainReading(E.applyPainReading(undefined, 5, 'A', '2026-09-01'), 5, 'B', '2026-09-02'), '2026-09-02').advise, false);
+});
+
+test('DEC-011: la ventana de 4 semanas se cuenta en días (28 inclusive) y las sesiones viejas dejan de contar', () => {
+  let rec = E.applyPainReading(undefined, 9, 'S1', '2026-09-01');
+  rec = E.applyPainReading(rec, 9, 'S2', '2026-09-20');
+  assert.equal(E.painProfessionalAdvice(rec, '2026-09-29').advise, true, 'S1 tiene 28 días: todavía cuenta');
+  assert.equal(E.painProfessionalAdvice(rec, '2026-09-30').advise, false, 'S1 tiene 29 días: ya no cuenta');
+  // El aviso no depende de que la marca de sustitución siga activa.
+  let flagged = E.applyPainReading(undefined, 9, 'S1', '2026-09-01');
+  flagged = E.applyPainReading(flagged, 9, 'S2', '2026-09-08');
+  let unflagged = E.applyPainReading(flagged, 1, 'S3', '2026-09-10');
+  unflagged = E.applyPainReading(unflagged, 1, 'S4', '2026-09-12');
+  assert.equal(unflagged.flagged, false, 'la marca se limpia con 2 sesiones distintas ≤5 (regla de DEC-009 intacta)');
+  assert.equal(E.painProfessionalAdvice(unflagged, '2026-09-12').advise, true);
+  // Se poda el historial viejo al escribir (no crece sin límite).
+  const later = E.applyPainReading(unflagged, 9, 'S5', '2026-11-30');
+  assert.deepEqual(later.painSessions.map(s => s.sessionId), ['S5']);
+});
+
+test('DEC-011: applyPainReading no muta el registro anterior y conserva la regla de DEC-009 (2 sesiones distintas limpias para desmarcar)', () => {
+  const rec0 = Object.freeze({ flagged: true, cleanStreak: 0, lastSessionId: 'S0', painSessions: Object.freeze([]) });
+  const rec1 = E.applyPainReading(rec0, 2, 'S0', '2026-09-01'); // misma sesión: no cuenta para desmarcar
+  assert.equal(rec1.flagged, true); assert.equal(rec1.cleanStreak, 0);
+  const rec2 = E.applyPainReading(rec1, 2, 'S1', '2026-09-02');
+  assert.equal(rec2.flagged, true); assert.equal(rec2.cleanStreak, 1);
+  const rec3 = E.applyPainReading(rec2, 3, 'S2', '2026-09-03');
+  assert.equal(rec3.flagged, false);
+  assert.equal(E.applyPainReading(rec3, 9, 'S3', '2026-09-04').flagged, true, 'dolor >5 vuelve a marcar');
+  // Registros guardados por versiones anteriores (sin painSessions) siguen funcionando.
+  assert.deepEqual(E.painProfessionalAdvice({ flagged: true, cleanStreak: 0, lastSessionId: 'x' }, '2026-09-01'), { advise: false, sessions: 0, evidence: 'E4' });
+});
+
+/* ---------- DEC-009 (Privacidad): export e import sin datos de salud ---------- */
+
+const HEALTH_KEYS = /"(health|painFlags|painNow|painSessions|pain|clearanceDate|injuries|screening|diabetes|healthSymptoms|diabetesType|injuryZones)":/;
+function storedProfileWithHealth() {
+  const data = E.normalizeProfile(withInjury(['shoulder', 'knee'], { healthSymptoms: 'on', healthMedicalClearance: 'on', diabetesType: 'type1', healthDiabetesMed: 'on' }));
+  data.health = cleared(cleared(data.health, 'shoulder', '2026-09-10'), 'knee', '2026-09-11');
+  return {
+    id: 'prof-1', createdAt: '2026-09-01', updatedAt: '2026-09-12', data,
+    log: [{ date: '2026-09-01', weightKg: 85, notes: 'Datos iniciales' }],
+    workouts: [
+      { sessionId: 's1', date: '2026-09-10', exercise: 'Press banca con barra', exerciseId: 'chest.bench_press_barbell', muscle: 'chest', setType: 'normal', setNumber: 1, weight: 80, reps: 8, pain: null },
+      { sessionId: 's1', date: '2026-09-10', exercise: 'Sentadilla trasera o sentadilla en hack', exerciseId: 'quads.squat_back_or_hack', muscle: 'quads', setType: 'normal', setNumber: 1, weight: 100, reps: 6, pain: 7 },
+    ],
+    painFlags: { squat_bilateral: { flagged: true, cleanStreak: 0, lastSessionId: 's1', painSessions: [{ sessionId: 's1', date: '2026-09-10' }] } },
+  };
+}
+
+test('DEC-009 privacidad: el export no incluye health, painFlags, dolor por serie ni fechas de autorización', () => {
+  const stored = storedProfileWithHealth();
+  const before = JSON.stringify(stored);
+  assert.match(before, HEALTH_KEYS, 'el perfil de prueba tiene que traer datos de salud');
+  const exported = E.exportProfile(stored);
+  assert.doesNotMatch(JSON.stringify(exported), HEALTH_KEYS, 'el export filtró datos de salud');
+  assert.ok(!('health' in exported.data) && !('painFlags' in exported));
+  assert.equal(JSON.stringify(stored), before, 'exportProfile no debe mutar el perfil local');
+  // Lo que no es salud se conserva: datos, medidas, historial de fuerza (sin el dolor).
+  assert.equal(exported.id, 'prof-1');
+  assert.equal(exported.data.name, stored.data.name);
+  assert.equal(exported.data.weightKg, stored.data.weightKg);
+  assert.deepEqual(exported.log, stored.log);
+  assert.deepEqual(exported.workouts.map(w => [w.exerciseId, w.weight, w.reps]), [['chest.bench_press_barbell', 80, 8], ['quads.squat_back_or_hack', 100, 6]]);
+  assert.ok(exported.workouts.every(w => !('pain' in w)));
+  // Es un perfil válido: genera plan, y sin condiciones declaradas.
+  const plan = E.buildPlan(exported.data, TODAY);
+  assert.equal(plan.health.anyCondition, false);
+  assert.equal(plan.health.blocked, false);
+});
+
+test('DEC-009 privacidad: un perfil sin datos de salud se exporta igual que antes (salvo el dolor por serie, que no existía)', () => {
+  const plain = { id: 'p2', createdAt: '2026-09-01', updatedAt: '2026-09-02', data: E.normalizeProfile(male), log: [] };
+  const exported = E.exportProfile(plain);
+  const { health, ...restOfData } = plain.data;
+  assert.deepEqual(exported.data, JSON.parse(JSON.stringify(restOfData)));
+  assert.ok(!('workouts' in exported), 'sin workouts no se inventa la clave');
+});
+
+test('DEC-009 privacidad: importar un archivo viejo con health y painFlags los ignora y no los guarda', () => {
+  const oldFile = JSON.parse(JSON.stringify(storedProfileWithHealth())); // formato de la versión anterior: incluye todo
+  const prepared = E.prepareImportedProfile(oldFile, TODAY);
+  assert.equal(prepared.droppedHealth, true, 'debe avisar que el archivo traía datos de salud');
+  assert.deepEqual(prepared.data.health, { screening: { regularExercise: false, cvMetabolicRenal: false, symptoms: false, medicalClearance: false }, diabetes: { type: 'none', medication: false }, injuries: [] });
+  // `health` queda como el objeto vacío por defecto; nada de lo que traía el archivo sobrevive.
+  assert.doesNotMatch(JSON.stringify(prepared), /"(painFlags|painNow|painSessions|pain|clearanceDate|healthSymptoms|diabetesType|injuryZones)":/);
+  assert.ok(!('painFlags' in prepared) && !('workouts' in prepared), 'no se guardan painFlags ni workouts del archivo');
+  // El perfil importado no queda pausado por nada que venga del archivo.
+  const plan = E.buildPlan(prepared.data, TODAY);
+  assert.equal(plan.health.blocked, false);
+  assert.equal(plan.health.anyCondition, false);
+  assert.deepEqual(plan.health.injuryClearance.pendingZones, []);
+  // También se ignoran los campos planos de salud (archivo armado a mano).
+  const flat = E.prepareImportedProfile({ data: Object.assign({}, male, { injuryZones: ['shoulder'], healthSymptoms: 'on', diabetesType: 'type2', healthDiabetesMed: 'on' }) }, TODAY);
+  assert.equal(flat.droppedHealth, true);
+  assert.deepEqual(flat.data.health.injuries, []);
+  assert.equal(flat.data.health.screening.symptoms, false);
+  assert.equal(flat.data.health.diabetes.type, 'none');
+  // painFlags suelto, sin health, también cuenta como dato ignorado y no se guarda.
+  const onlyPain = E.prepareImportedProfile({ data: male, painFlags: oldFile.painFlags }, TODAY);
+  assert.equal(onlyPain.droppedHealth, true);
+  assert.ok(!('painFlags' in onlyPain));
+});
+
+test('DEC-009 privacidad: importar un archivo sin datos de salud deja el perfil sin lesiones y sin aviso de datos ignorados', () => {
+  const noHealth = E.prepareImportedProfile({ createdAt: '2026-08-01', data: male, log: [{ date: '2026-08-01', weightKg: 85 }] }, TODAY);
+  assert.equal(noHealth.droppedHealth, false);
+  assert.deepEqual(noHealth.data.health.injuries, []);
+  assert.equal(noHealth.createdAt, '2026-08-01');
+  assert.equal(noHealth.updatedAt, TODAY);
+  assert.equal(E.prepareImportedProfile({ data: male }, TODAY).createdAt, TODAY);
+  // Un `health` vacío (lo que exportaba la versión anterior sin condiciones) no es "datos ignorados".
+  const emptyHealth = E.prepareImportedProfile({ data: E.normalizeProfile(male) }, TODAY);
+  assert.equal(emptyHealth.droppedHealth, false);
+});
+
+test('DEC-009 privacidad: se avisa antes de importar si ya hay un perfil local con lesiones que se parece', () => {
+  const local = storedProfileWithHealth();
+  const plainLocal = { id: 'p9', data: E.normalizeProfile(Object.assign({}, male, { name: 'Otro' })) };
+  const incoming = { id: 'prof-1', data: Object.assign({}, male, { name: 'Distinto' }) };
+  assert.deepEqual(E.localHealthConflicts([local, plainLocal], incoming).map(p => p.id), ['prof-1'], 'mismo id');
+  const sameName = { id: 'otro-id', data: Object.assign({}, male, { name: local.data.name }) };
+  assert.deepEqual(E.localHealthConflicts([local, plainLocal], sameName).map(p => p.id), ['prof-1'], 'mismo nombre');
+  assert.deepEqual(E.localHealthConflicts([local, plainLocal], { id: 'x', data: Object.assign({}, male, { name: 'Otro' }) }), [], 'el parecido sin lesiones locales no avisa');
+  assert.deepEqual(E.localHealthConflicts([local], { id: 'x', data: Object.assign({}, male, { name: 'Nadie' }) }), []);
+});
+
+/* ---------- DEC-011 (ajuste): la autorización se invalida cuando una zona empeora ---------- */
+
+// Perfil guardado con las zonas dadas, todas con autorización fechada, y los
+// flags de dolor/diagnóstico indicados. Devuelve el perfil y la edición típica.
+function authorizedProfile(zones, { pain = [], diagnosed = [] } = {}) {
+  const base = E.normalizeProfile(withInjury(zones, { injuryPainNow: pain, injuryDiagnosed: diagnosed }));
+  base.health = zones.reduce((h, z, i) => cleared(h, z, `2026-09-1${i}`), base.health);
+  return base;
+}
+function editAndReconcile(stored, zones, { pain = [], diagnosed = [] } = {}) {
+  const edited = E.normalizeProfile(withInjury(zones, { injuryPainNow: pain, injuryDiagnosed: diagnosed }));
+  const health = E.reconcileInjuryClearances(stored.health, edited.health);
+  return { health, plan: E.buildPlan(Object.assign({}, edited, { health }), TODAY) };
+}
+
+test('DEC-011: una subida del dolor de una zona invalida su autorización y pausa el plan', () => {
+  const stored = authorizedProfile(['shoulder']);
+  assert.equal(E.buildPlan(stored, TODAY).health.blocked, false, 'autorizado y sin cambios: el plan se muestra');
+  const { health, plan } = editAndReconcile(stored, ['shoulder'], { pain: ['shoulder'] });
+  assert.equal(health.injuries[0].clearanceDate, null);
+  assert.equal(health.injuries[0].painNow, true);
+  assert.equal(plan.health.blocked, true);
+  assert.deepEqual(plan.health.injuryClearance.pendingZones, ['shoulder']);
+  // Mismo flujo que la primera vez: advertencia + derivación, y se destraba con una confirmación fechada nueva.
+  assert.match(plan.health.injuryBlockReason, /no puede adaptar una rutina a una lesión/);
+  const reconfirmed = Object.assign({}, stored, { health: cleared(health, 'shoulder', '2026-09-20') });
+  assert.equal(E.buildPlan(reconfirmed, TODAY).health.blocked, false);
+  assert.equal(E.buildPlan(reconfirmed, TODAY).health.injuries[0].clearanceDate, '2026-09-20');
+});
+
+test('DEC-011: una bajada del dolor, o dejarlo igual, no pide nada', () => {
+  const stored = authorizedProfile(['shoulder', 'knee'], { pain: ['shoulder', 'knee'] });
+  const down = editAndReconcile(stored, ['shoulder', 'knee'], { pain: ['knee'] }); // el hombro baja, la rodilla sigue igual
+  assert.deepEqual(down.health.injuries.map(i => [i.zone, i.painNow, i.clearanceDate]), [['shoulder', false, '2026-09-10'], ['knee', true, '2026-09-11']]);
+  assert.equal(down.plan.health.blocked, false);
+  const allDown = editAndReconcile(stored, ['shoulder', 'knee']);
+  assert.equal(allDown.plan.health.blocked, false);
+  assert.deepEqual(allDown.health.injuries.map(i => i.clearanceDate), ['2026-09-10', '2026-09-11']);
+  const same = editAndReconcile(stored, ['shoulder', 'knee'], { pain: ['shoulder', 'knee'] });
+  assert.equal(same.plan.health.blocked, false);
+});
+
+test('DEC-011: un cambio de diagnóstico, en cualquier sentido, invalida la autorización y pausa el plan', () => {
+  const undiagnosed = authorizedProfile(['knee']);
+  const gotDiagnosis = editAndReconcile(undiagnosed, ['knee'], { diagnosed: ['knee'] });
+  assert.equal(gotDiagnosis.health.injuries[0].clearanceDate, null);
+  assert.equal(gotDiagnosis.plan.health.blocked, true);
+  const diagnosed = authorizedProfile(['knee'], { diagnosed: ['knee'] });
+  const lostDiagnosis = editAndReconcile(diagnosed, ['knee']);
+  assert.equal(lostDiagnosis.health.injuries[0].clearanceDate, null);
+  assert.equal(lostDiagnosis.plan.health.blocked, true);
+  // Diagnóstico que cambia a la vez que el dolor baja: pausa igual (cambió el diagnóstico).
+  const both = editAndReconcile(authorizedProfile(['knee'], { pain: ['knee'] }), ['knee'], { diagnosed: ['knee'] });
+  assert.equal(both.plan.health.blocked, true);
+  // Diagnóstico sin cambios: se mantiene.
+  assert.equal(editAndReconcile(diagnosed, ['knee'], { diagnosed: ['knee'] }).plan.health.blocked, false);
+});
+
+test('DEC-011: la invalidación es por zona; las demás conservan su fecha, y las zonas nuevas siguen pidiéndose', () => {
+  const stored = authorizedProfile(['shoulder', 'knee']);
+  const { health, plan } = editAndReconcile(stored, ['shoulder', 'knee', 'ankle'], { pain: ['knee'] });
+  assert.deepEqual(health.injuries.map(i => [i.zone, i.clearanceDate]), [['shoulder', '2026-09-10'], ['knee', null], ['ankle', null]]);
+  assert.deepEqual(plan.health.injuryClearance.pendingZones, ['knee', 'ankle']);
+  assert.doesNotMatch(plan.health.injuryBlockReason, /Hombro/);
+});
+
+test('DEC-011: reconcileInjuryClearances no muta sus entradas, tolera no tener estado previo y respeta carryOverInjuryClearances', () => {
+  const stored = authorizedProfile(['shoulder']);
+  const edited = E.normalizeProfile(withInjury(['shoulder'], { injuryPainNow: ['shoulder'] }));
+  const storedBefore = JSON.stringify(stored.health), editedBefore = JSON.stringify(edited.health);
+  E.reconcileInjuryClearances(stored.health, edited.health);
+  assert.equal(JSON.stringify(stored.health), storedBefore);
+  assert.equal(JSON.stringify(edited.health), editedBefore);
+  assert.equal(E.reconcileInjuryClearances(undefined, edited.health).injuries[0].clearanceDate, null, 'sin estado previo no inventa fechas');
+  // Sin cambios de dolor ni diagnóstico equivale exactamente a carryOver.
+  const noChange = E.normalizeProfile(withInjury(['shoulder']));
+  assert.deepEqual(E.reconcileInjuryClearances(stored.health, noChange.health), E.carryOverInjuryClearances(stored.health, noChange.health));
+});
+
+/* ---------- DEC-010: series del paseo del granjero en la configuración ---------- */
+
+test('DEC-010: las series del paseo del granjero viven en VALIDATOR_RULES con el mismo formato que SESSION_SET_CAP', () => {
+  const cap = K.VALIDATOR_RULES.sessionSetCap, carry = K.VALIDATOR_RULES.functionalNoVolumeExtraSets;
+  assert.ok(carry, 'falta la regla functionalNoVolumeExtraSets');
+  assert.equal(carry.value, 2);
+  assert.equal(carry.level, 'E4');
+  assert.equal(carry.source, null);
+  assert.equal(carry.reviewRequired, true);
+  assert.match(carry.reviewedAt, /^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(carry.verifiedAgainstPrimarySource, false);
+  assert.ok(carry.note);
+  assert.deepEqual(Object.keys(carry).sort(), Object.keys(cap).sort(), 'mismas claves que sessionSetCap');
+});
+
+test('DEC-010: el motor lee las series del paseo del granjero desde VALIDATOR_RULES (cambiar el valor cambia el plan; con el valor actual, no)', () => {
+  const rule = K.VALIDATOR_RULES.functionalNoVolumeExtraSets;
+  const original = rule.value;
+  const planWith = value => {
+    rule.value = value;
+    try { return E.buildPlan(Object.assign({}, male, { healthGoal: true }), TODAY); } finally { rule.value = original; }
+  };
+  const carries = plan => plan.training.sessions.flatMap(s => s.exercises).filter(e => e.exerciseId === 'functional.farmer_carry');
+  const others = plan => plan.training.sessions.map(s => s.exercises.filter(e => e.exerciseId !== 'functional.farmer_carry'));
+  const base = planWith(original), three = planWith(3), one = planWith(1);
+  assert.ok(carries(base).length >= 1);
+  assert.ok(carries(base).every(e => e.sets === 2), 'con el valor actual, 2 series (salida sin cambios)');
+  assert.ok(carries(three).every(e => e.sets === 3), 'con valor 3 el motor tiene que usar 3 series');
+  assert.ok(carries(one).every(e => e.sets === 1));
+  // Sin descontar de nadie: el resto de los ejercicios no cambia aunque cambie el valor.
+  assert.deepEqual(others(three), others(base));
+  assert.deepEqual(others(one), others(base));
+  // Y el total de series de los días con paseo sí refleja el valor (cuenta en totalSets).
+  base.training.sessions.forEach((s, i) => {
+    const n = s.exercises.filter(e => e.exerciseId === 'functional.farmer_carry').length;
+    assert.equal(three.training.sessions[i].totalSets - s.totalSets, n, 'cada paseo suma 1 serie más');
+  });
+  assert.equal(rule.value, original, 'el test restauró el valor');
+});
+
+/* ---------- DEC-011: la pausa explica cuándo una zona se pide de nuevo por empeorar ---------- */
+
+test('DEC-011: reconcile marca solo las zonas que PERDIERON una autorización por empeorar; la primera autorización no se marca', () => {
+  const stored = authorizedProfile(['shoulder', 'knee']);
+  const up = editAndReconcile(stored, ['shoulder', 'knee'], { pain: ['shoulder'] });
+  assert.deepEqual(E.zonesPendingReauthorization(up.health), ['shoulder']);
+  assert.equal(up.health.injuries.find(i => i.zone === 'shoulder').clearanceInvalidated, true);
+  assert.ok(!('clearanceInvalidated' in up.health.injuries.find(i => i.zone === 'knee')), 'la clave solo existe cuando vale true');
+  // Cambio de diagnóstico en cualquier sentido también marca.
+  assert.deepEqual(E.zonesPendingReauthorization(editAndReconcile(stored, ['shoulder', 'knee'], { diagnosed: ['knee'] }).health), ['knee']);
+  assert.deepEqual(E.zonesPendingReauthorization(editAndReconcile(authorizedProfile(['knee'], { diagnosed: ['knee'] }), ['knee']).health), ['knee']);
+  // Primera autorización: zona nueva, o zona declarada que nunca se autorizó (aunque empeore): no se marca.
+  assert.deepEqual(E.zonesPendingReauthorization(editAndReconcile(stored, ['shoulder', 'knee', 'ankle']).health), []);
+  const neverAuthorized = E.normalizeProfile(withInjury(['shoulder']));
+  assert.deepEqual(E.zonesPendingReauthorization(E.reconcileInjuryClearances(neverAuthorized.health, E.normalizeProfile(withInjury(['shoulder'], { injuryPainNow: ['shoulder'] })).health)), []);
+  // Perfiles sin lesiones o sin salud: nada.
+  assert.deepEqual(E.zonesPendingReauthorization(E.normalizeProfile(male).health), []);
+  assert.deepEqual(E.zonesPendingReauthorization(undefined), []);
+});
+
+test('DEC-011: la marca de re-autorización sobrevive a más ediciones hasta confirmar, y se apaga al confirmar', () => {
+  const stored = authorizedProfile(['shoulder', 'knee']);
+  const worsened = editAndReconcile(stored, ['shoulder', 'knee'], { pain: ['shoulder'] }).health;
+  // Otra edición sin relación (no confirmaron todavía): sigue marcada. Aunque el dolor baje, sigue pendiente.
+  const again = E.reconcileInjuryClearances(worsened, E.normalizeProfile(withInjury(['shoulder', 'knee'])).health);
+  assert.deepEqual(E.zonesPendingReauthorization(again), ['shoulder']);
+  assert.equal(again.injuries.find(i => i.zone === 'shoulder').clearanceDate, null);
+  // Empeora de nuevo estando pendiente: sigue siendo una re-autorización, no una primera vez.
+  const worseAgain = E.reconcileInjuryClearances(again, E.normalizeProfile(withInjury(['shoulder', 'knee'], { injuryPainNow: ['shoulder'] })).health);
+  assert.deepEqual(E.zonesPendingReauthorization(worseAgain), ['shoulder']);
+  // Al confirmar (fecha nueva, la clave se borra) deja de estar pendiente; aunque la clave quedara, con fecha no cuenta.
+  const confirmed = cleared(worseAgain, 'shoulder', '2026-09-20');
+  assert.deepEqual(E.zonesPendingReauthorization(confirmed), []);
+  const confirmedClean = JSON.parse(JSON.stringify(confirmed)); delete confirmedClean.injuries.find(i => i.zone === 'shoulder').clearanceInvalidated;
+  assert.deepEqual(E.zonesPendingReauthorization(confirmedClean), []);
+  // Si después de confirmar vuelve a empeorar, es otra re-autorización.
+  const edited = E.reconcileInjuryClearances(confirmedClean, E.normalizeProfile(withInjury(['shoulder', 'knee'], { injuryPainNow: ['shoulder'], injuryDiagnosed: ['shoulder'] })).health);
+  assert.deepEqual(E.zonesPendingReauthorization(edited), ['shoulder']);
+});
+
+test('DEC-011: la marca de re-autorización no altera el plan (solo la pantalla la usa) y no sale en el export', () => {
+  const stored = authorizedProfile(['shoulder']);
+  const worsened = editAndReconcile(stored, ['shoulder'], { pain: ['shoulder'] });
+  const plain = E.buildPlan(E.normalizeProfile(withInjury(['shoulder'], { injuryPainNow: ['shoulder'] })), TODAY);
+  assert.deepEqual(Object.keys(worsened.plan.health).sort(), Object.keys(plain.health).sort(), 'no hay claves nuevas en plan.health');
+  assert.equal(worsened.plan.health.injuryBlockReason, plain.health.injuryBlockReason, 'el texto de la pausa del motor es el mismo');
+  const exported = E.exportProfile({ id: 'x', data: Object.assign({}, E.normalizeProfile(withInjury(['shoulder'])), { health: worsened.health }) });
+  assert.doesNotMatch(JSON.stringify(exported), /clearanceInvalidated/);
+});
