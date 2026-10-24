@@ -745,3 +745,97 @@ test('DEC-011: applyPainReading no muta el registro anterior y conserva la regla
   // Registros guardados por versiones anteriores (sin painSessions) siguen funcionando.
   assert.deepEqual(E.painProfessionalAdvice({ flagged: true, cleanStreak: 0, lastSessionId: 'x' }, '2026-09-01'), { advise: false, sessions: 0, evidence: 'E4' });
 });
+
+/* ---------- DEC-009 (Privacidad): export e import sin datos de salud ---------- */
+
+const HEALTH_KEYS = /"(health|painFlags|painNow|painSessions|pain|clearanceDate|injuries|screening|diabetes|healthSymptoms|diabetesType|injuryZones)":/;
+function storedProfileWithHealth() {
+  const data = E.normalizeProfile(withInjury(['shoulder', 'knee'], { healthSymptoms: 'on', healthMedicalClearance: 'on', diabetesType: 'type1', healthDiabetesMed: 'on' }));
+  data.health = cleared(cleared(data.health, 'shoulder', '2026-09-10'), 'knee', '2026-09-11');
+  return {
+    id: 'prof-1', createdAt: '2026-09-01', updatedAt: '2026-09-12', data,
+    log: [{ date: '2026-09-01', weightKg: 85, notes: 'Datos iniciales' }],
+    workouts: [
+      { sessionId: 's1', date: '2026-09-10', exercise: 'Press banca con barra', exerciseId: 'chest.bench_press_barbell', muscle: 'chest', setType: 'normal', setNumber: 1, weight: 80, reps: 8, pain: null },
+      { sessionId: 's1', date: '2026-09-10', exercise: 'Sentadilla trasera o sentadilla en hack', exerciseId: 'quads.squat_back_or_hack', muscle: 'quads', setType: 'normal', setNumber: 1, weight: 100, reps: 6, pain: 7 },
+    ],
+    painFlags: { squat_bilateral: { flagged: true, cleanStreak: 0, lastSessionId: 's1', painSessions: [{ sessionId: 's1', date: '2026-09-10' }] } },
+  };
+}
+
+test('DEC-009 privacidad: el export no incluye health, painFlags, dolor por serie ni fechas de autorización', () => {
+  const stored = storedProfileWithHealth();
+  const before = JSON.stringify(stored);
+  assert.match(before, HEALTH_KEYS, 'el perfil de prueba tiene que traer datos de salud');
+  const exported = E.exportProfile(stored);
+  assert.doesNotMatch(JSON.stringify(exported), HEALTH_KEYS, 'el export filtró datos de salud');
+  assert.ok(!('health' in exported.data) && !('painFlags' in exported));
+  assert.equal(JSON.stringify(stored), before, 'exportProfile no debe mutar el perfil local');
+  // Lo que no es salud se conserva: datos, medidas, historial de fuerza (sin el dolor).
+  assert.equal(exported.id, 'prof-1');
+  assert.equal(exported.data.name, stored.data.name);
+  assert.equal(exported.data.weightKg, stored.data.weightKg);
+  assert.deepEqual(exported.log, stored.log);
+  assert.deepEqual(exported.workouts.map(w => [w.exerciseId, w.weight, w.reps]), [['chest.bench_press_barbell', 80, 8], ['quads.squat_back_or_hack', 100, 6]]);
+  assert.ok(exported.workouts.every(w => !('pain' in w)));
+  // Es un perfil válido: genera plan, y sin condiciones declaradas.
+  const plan = E.buildPlan(exported.data, TODAY);
+  assert.equal(plan.health.anyCondition, false);
+  assert.equal(plan.health.blocked, false);
+});
+
+test('DEC-009 privacidad: un perfil sin datos de salud se exporta igual que antes (salvo el dolor por serie, que no existía)', () => {
+  const plain = { id: 'p2', createdAt: '2026-09-01', updatedAt: '2026-09-02', data: E.normalizeProfile(male), log: [] };
+  const exported = E.exportProfile(plain);
+  const { health, ...restOfData } = plain.data;
+  assert.deepEqual(exported.data, JSON.parse(JSON.stringify(restOfData)));
+  assert.ok(!('workouts' in exported), 'sin workouts no se inventa la clave');
+});
+
+test('DEC-009 privacidad: importar un archivo viejo con health y painFlags los ignora y no los guarda', () => {
+  const oldFile = JSON.parse(JSON.stringify(storedProfileWithHealth())); // formato de la versión anterior: incluye todo
+  const prepared = E.prepareImportedProfile(oldFile, TODAY);
+  assert.equal(prepared.droppedHealth, true, 'debe avisar que el archivo traía datos de salud');
+  assert.deepEqual(prepared.data.health, { screening: { regularExercise: false, cvMetabolicRenal: false, symptoms: false, medicalClearance: false }, diabetes: { type: 'none', medication: false }, injuries: [] });
+  // `health` queda como el objeto vacío por defecto; nada de lo que traía el archivo sobrevive.
+  assert.doesNotMatch(JSON.stringify(prepared), /"(painFlags|painNow|painSessions|pain|clearanceDate|healthSymptoms|diabetesType|injuryZones)":/);
+  assert.ok(!('painFlags' in prepared) && !('workouts' in prepared), 'no se guardan painFlags ni workouts del archivo');
+  // El perfil importado no queda pausado por nada que venga del archivo.
+  const plan = E.buildPlan(prepared.data, TODAY);
+  assert.equal(plan.health.blocked, false);
+  assert.equal(plan.health.anyCondition, false);
+  assert.deepEqual(plan.health.injuryClearance.pendingZones, []);
+  // También se ignoran los campos planos de salud (archivo armado a mano).
+  const flat = E.prepareImportedProfile({ data: Object.assign({}, male, { injuryZones: ['shoulder'], healthSymptoms: 'on', diabetesType: 'type2', healthDiabetesMed: 'on' }) }, TODAY);
+  assert.equal(flat.droppedHealth, true);
+  assert.deepEqual(flat.data.health.injuries, []);
+  assert.equal(flat.data.health.screening.symptoms, false);
+  assert.equal(flat.data.health.diabetes.type, 'none');
+  // painFlags suelto, sin health, también cuenta como dato ignorado y no se guarda.
+  const onlyPain = E.prepareImportedProfile({ data: male, painFlags: oldFile.painFlags }, TODAY);
+  assert.equal(onlyPain.droppedHealth, true);
+  assert.ok(!('painFlags' in onlyPain));
+});
+
+test('DEC-009 privacidad: importar un archivo sin datos de salud deja el perfil sin lesiones y sin aviso de datos ignorados', () => {
+  const noHealth = E.prepareImportedProfile({ createdAt: '2026-08-01', data: male, log: [{ date: '2026-08-01', weightKg: 85 }] }, TODAY);
+  assert.equal(noHealth.droppedHealth, false);
+  assert.deepEqual(noHealth.data.health.injuries, []);
+  assert.equal(noHealth.createdAt, '2026-08-01');
+  assert.equal(noHealth.updatedAt, TODAY);
+  assert.equal(E.prepareImportedProfile({ data: male }, TODAY).createdAt, TODAY);
+  // Un `health` vacío (lo que exportaba la versión anterior sin condiciones) no es "datos ignorados".
+  const emptyHealth = E.prepareImportedProfile({ data: E.normalizeProfile(male) }, TODAY);
+  assert.equal(emptyHealth.droppedHealth, false);
+});
+
+test('DEC-009 privacidad: se avisa antes de importar si ya hay un perfil local con lesiones que se parece', () => {
+  const local = storedProfileWithHealth();
+  const plainLocal = { id: 'p9', data: E.normalizeProfile(Object.assign({}, male, { name: 'Otro' })) };
+  const incoming = { id: 'prof-1', data: Object.assign({}, male, { name: 'Distinto' }) };
+  assert.deepEqual(E.localHealthConflicts([local, plainLocal], incoming).map(p => p.id), ['prof-1'], 'mismo id');
+  const sameName = { id: 'otro-id', data: Object.assign({}, male, { name: local.data.name }) };
+  assert.deepEqual(E.localHealthConflicts([local, plainLocal], sameName).map(p => p.id), ['prof-1'], 'mismo nombre');
+  assert.deepEqual(E.localHealthConflicts([local, plainLocal], { id: 'x', data: Object.assign({}, male, { name: 'Otro' }) }), [], 'el parecido sin lesiones locales no avisa');
+  assert.deepEqual(E.localHealthConflicts([local], { id: 'x', data: Object.assign({}, male, { name: 'Nadie' }) }), []);
+});

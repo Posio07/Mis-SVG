@@ -218,6 +218,35 @@ const server = http.createServer((req, res) => {
   const afterAdd = await page.evaluate(() => JSON.parse(localStorage.getItem('ifbb-agent:v1')).profiles.find(p => p.data.name === 'Lesión · Test').data.health.injuries);
   if (afterAdd.find(i => i.zone === 'shoulder').clearanceDate !== clearedHealth.injuries[0].clearanceDate) throw new Error('se perdió la fecha de la zona ya confirmada');
 
+  // DEC-009 (privacidad) en navegador: el export descargado no trae datos de
+  // salud; importar un archivo viejo (con health y painFlags) los ignora, y si ya
+  // hay un perfil local con lesiones se avisa antes (cancelar no importa nada).
+  const healthKeys = /"(health|painFlags|painNow|painSessions|clearanceDate|injuries|screening|diabetes)":/;
+  await page.click('.tab[data-tab=profiles]');
+  const [download] = await Promise.all([page.waitForEvent('download'), page.click('#btn-export')]);
+  const exportedText = fs.readFileSync(await download.path(), 'utf8');
+  if (healthKeys.test(exportedText)) throw new Error('el export descargado incluye datos de salud: ' + exportedText.match(healthKeys)[0]);
+  if (JSON.parse(exportedText).data.name !== 'Lesión · Test') throw new Error('el export no es del perfil activo');
+  const legacyPath = path.join(shots, 'legacy-export.json');
+  const localProfile = await page.evaluate(() => JSON.parse(localStorage.getItem('ifbb-agent:v1')).profiles.find(p => p.data.name === 'Lesión · Test'));
+  if (!localProfile.data.health.injuries.length) throw new Error('el perfil local de prueba debería tener lesiones');
+  fs.writeFileSync(legacyPath, JSON.stringify(Object.assign({}, localProfile, { painFlags: { shoulder_press_safe: { flagged: true, cleanStreak: 0, lastSessionId: 'x', painSessions: [] } } })));
+  const countProfiles = () => page.evaluate(() => JSON.parse(localStorage.getItem('ifbb-agent:v1')).profiles.length);
+  const before = await countProfiles();
+  let warned = '';
+  page.once('dialog', d => { warned = d.message(); d.dismiss(); });
+  await page.setInputFiles('#file-import', legacyPath);
+  await page.waitForFunction(() => /Importación cancelada/.test(document.body.textContent));
+  if (!/Ya tenés un perfil .* con lesiones declaradas/.test(warned) || !/NUEVO sin lesiones/.test(warned)) throw new Error('falta la advertencia antes de importar sobre un perfil con lesiones: ' + warned);
+  if (await countProfiles() !== before) throw new Error('cancelar la advertencia no debería importar nada');
+  page.once('dialog', d => d.accept());
+  await page.setInputFiles('#file-import', legacyPath);
+  await page.waitForFunction(n => JSON.parse(localStorage.getItem('ifbb-agent:v1')).profiles.length === n, before + 1);
+  const afterImport = await page.evaluate(() => JSON.parse(localStorage.getItem('ifbb-agent:v1')).profiles);
+  const imported = afterImport[afterImport.length - 1];
+  if (imported.data.health.injuries.length || imported.painFlags || imported.data.health.screening.symptoms) throw new Error('el import guardó datos de salud del archivo: ' + JSON.stringify(imported.data.health));
+  if (!afterImport.find(p => p.id === localProfile.id).data.health.injuries.length) throw new Error('el import borró las lesiones del perfil local');
+
   // Service worker registrado y manifest válido
   const sw = await page.evaluate(async () => { const r = await navigator.serviceWorker.getRegistration(); return !!r; });
   const manifest = await (await page.request.get(base + 'manifest.webmanifest')).json();

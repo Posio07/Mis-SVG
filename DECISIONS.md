@@ -138,6 +138,13 @@ El plan de la app se considera de intensidad vigorosa a estos efectos. Lógica:
 ### Privacidad
 - Los datos de salud (tamizaje, diabetes, lesiones, registros de dolor) se guardan solo en el dispositivo (`localStorage`), nunca se incluyen en la exportación JSON del perfil y se pueden borrar con un botón ("Borrar datos de salud") sin afectar el resto del perfil.
 
+**Arreglo posterior (esta regla no se cumplía en el código):** al revisar DEC-011 se vio que `exportJson` serializaba el perfil completo (`JSON.stringify(profile)`), así que el archivo exportado llevaba `data.health` (tamizaje, diabetes, lesiones y, desde DEC-011, la fecha de autorización por zona), `painFlags` y el dolor registrado en cada serie (`workouts[].pain`), a pesar de lo escrito arriba. Se corrigió con funciones puras de `engine.js`, testeadas:
+- **Export (`exportProfile`):** copia del perfil sin `data.health`, sin `painFlags` y sin `workouts[].pain`. Se conserva el resto (datos, medidas, historial de fuerza con peso y repeticiones). No muta el perfil local.
+- **Import (`prepareImportedProfile`):** ignora y no guarda `health`, los campos planos de salud del formulario y `painFlags`, también en archivos exportados con la versión anterior que sí los traían. Un perfil importado queda siempre sin lesiones declaradas, sin tamizaje y sin diabetes; si el archivo traía datos de salud con contenido, se avisa en pantalla que se ignoraron. `workouts` tampoco se importa (nunca se importó).
+- **Advertencia previa (`localHealthConflicts`):** el import nunca pisa un perfil existente (siempre crea uno nuevo), así que no se pueden borrar lesiones locales. Aun así, si ya hay un perfil local con lesiones declaradas que tiene el mismo id de exportación o el mismo nombre, se pregunta antes de importar y se explica que el nuevo quedará sin lesiones y que el existente conserva las suyas. Cancelar no importa nada.
+- **Por qué:** los datos de salud son sensibles. Un archivo exportado suele terminar en un chat, un correo o una nube, y no tiene por qué llevar lesiones, diabetes ni fechas de autorización médica de nadie.
+- Quien ya tenga archivos exportados con la versión anterior conserva esos datos dentro de ellos: el arreglo evita nuevas filtraciones, pero no puede borrar lo que ya se exportó.
+
 ### Disclaimer
 Visible en el perfil y en el plan cuando haya cualquier condición declarada (tamizaje con aviso, diabetes o alguna lesión):
 > "Estas adaptaciones aplican posicionamientos científicos oficiales y no reemplazan la valoración de un médico, fisioterapeuta o entrenador certificado."

@@ -842,6 +842,58 @@
     return { advise: sessions >= K.VALIDATOR_RULES.painAdviceMinSessions.value, sessions, evidence: 'E4' };
   }
 
+  /* ---------- DEC-009 (Privacidad): export e import sin datos de salud ---------- */
+
+  // Campos planos del formulario que normalizeHealth sabe leer: un archivo
+  // armado a mano o por otra versión podría traerlos en vez de `health`.
+  const HEALTH_FORM_FIELDS = ['healthRegularExercise', 'healthCvMetabolicRenal', 'healthSymptoms', 'healthMedicalClearance', 'healthDiabetesMed', 'diabetesType', 'injuryZones', 'injuryDiagnosed', 'injuryPainNow'];
+
+  function stripHealthFields(data) {
+    const copy = Object.assign({}, data);
+    delete copy.health;
+    HEALTH_FORM_FIELDS.forEach(k => { delete copy[k]; });
+    return copy;
+  }
+
+  function healthHasContent(h) {
+    const s = (h && h.screening) || {}, d = (h && h.diabetes) || {};
+    return !!(s.regularExercise || s.cvMetabolicRenal || s.symptoms || s.medicalClearance || (d.type && d.type !== 'none') || d.medication || ((h && h.injuries) || []).length);
+  }
+
+  // Copia del perfil lista para exportar: sin `health` (tamizaje, diabetes,
+  // lesiones y fechas de autorización por zona), sin `painFlags` y sin el
+  // dolor registrado en cada serie (`workouts[].pain`). No muta el original.
+  function exportProfile(profile) {
+    const out = {};
+    Object.keys(profile).forEach(k => { if (k !== 'painFlags') out[k] = profile[k]; });
+    out.data = stripHealthFields(profile.data || {});
+    if (Array.isArray(profile.workouts)) out.workouts = profile.workouts.map(w => { const c = Object.assign({}, w); delete c.pain; return c; });
+    return JSON.parse(JSON.stringify(out));
+  }
+
+  // Arma el perfil a guardar desde un item importado. Ignora (y no guarda)
+  // `health`, los campos planos de salud y `painFlags`, también en archivos
+  // exportados por la versión anterior que sí los incluían. `droppedHealth`
+  // avisa si el archivo traía algo de salud con contenido.
+  function prepareImportedProfile(item, today) {
+    const droppedHealth = healthHasContent(normalizeHealth(item.data)) || !!(item.painFlags && Object.keys(item.painFlags).length);
+    return {
+      createdAt: item.createdAt || today, updatedAt: today,
+      data: normalizeProfile(stripHealthFields(item.data)),
+      log: Array.isArray(item.log) ? item.log : [],
+      droppedHealth,
+    };
+  }
+
+  // Perfiles locales con lesiones declaradas que se parecen al que se va a
+  // importar (mismo id de exportación o mismo nombre). El import siempre crea
+  // un perfil NUEVO, así que no pisa nada, pero el nuevo queda sin lesiones y
+  // conviene avisarlo antes.
+  function localHealthConflicts(localProfiles, item) {
+    const name = ((item.data && item.data.name) || '').toString().trim();
+    return localProfiles.filter(p => (p.id === item.id || p.data.name === name) && ((p.data.health && p.data.health.injuries) || []).length > 0);
+  }
+
   function normalizeProfile(src) {
     const n = v => { const x = parseFloat(v); return isFinite(x) ? x : 0; };
     const sex = src.sex === 'F' ? 'F' : 'M';
@@ -886,5 +938,5 @@
 
   function unique(arr) { return arr.filter((v, i) => v && arr.indexOf(v) === i); }
 
-  return { bmrMifflin, bmrKatch, bodyFatNavy, ffmi, classicLimit, computeMetrics, computeTargets, computeNutrition, computeTraining, computeHealthScreen, buildPlan, normalizeProfile, validateProfile, exerciseFields, carryOverInjuryClearances, applyPainReading, painProfessionalAdvice, SPLITS, LB_PER_KG };
+  return { bmrMifflin, bmrKatch, bodyFatNavy, ffmi, classicLimit, computeMetrics, computeTargets, computeNutrition, computeTraining, computeHealthScreen, buildPlan, normalizeProfile, validateProfile, exerciseFields, carryOverInjuryClearances, applyPainReading, painProfessionalAdvice, exportProfile, prepareImportedProfile, localHealthConflicts, SPLITS, LB_PER_KG };
 });

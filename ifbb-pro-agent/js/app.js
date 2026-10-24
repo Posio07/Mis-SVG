@@ -182,7 +182,8 @@
 
   function exportJson() {
     const p = active(); if (!p) return;
-    const blob = new Blob([JSON.stringify(p, null, 2)], { type: 'application/json' });
+    // DEC-009 (Privacidad): los datos de salud nunca salen del dispositivo.
+    const blob = new Blob([JSON.stringify(ENGINE.exportProfile(p), null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `ifbb-agent-${p.data.name.replace(/[^\w-]+/g, '_')}.json`;
@@ -197,16 +198,23 @@
       try {
         const obj = JSON.parse(reader.result);
         const list = Array.isArray(obj) ? obj : Array.isArray(obj.profiles) ? obj.profiles : [obj];
-        let count = 0;
+        let count = 0, droppedHealth = false, cancelled = false;
         list.forEach(item => {
           if (!item || !item.data || !item.data.name) return;
           const errs = ENGINE.validateProfile(item.data);
           if (errs.length) return;
-          state.profiles.push({ id: uid(), createdAt: item.createdAt || todayIso(), updatedAt: todayIso(), data: ENGINE.normalizeProfile(item.data), log: Array.isArray(item.log) ? item.log : [] });
+          // DEC-009 (Privacidad): el import nunca pisa un perfil existente (siempre
+          // crea uno nuevo) y nunca trae datos de salud; si ya hay un perfil con
+          // lesiones declaradas que se parece, se avisa antes de importar.
+          const conflicts = ENGINE.localHealthConflicts(state.profiles, item);
+          if (conflicts.length && !confirm(`Ya tenés un perfil "${conflicts[0].data.name}" con lesiones declaradas. Este archivo no trae datos de salud (por privacidad no se exportan), así que se va a importar como un perfil NUEVO sin lesiones declaradas. Tu perfil actual no se modifica y conserva sus lesiones. ¿Importar de todos modos?`)) { cancelled = true; return; }
+          const prepared = ENGINE.prepareImportedProfile(item, todayIso());
+          droppedHealth = droppedHealth || prepared.droppedHealth;
+          state.profiles.push({ id: uid(), createdAt: prepared.createdAt, updatedAt: prepared.updatedAt, data: prepared.data, log: prepared.log });
           count++;
         });
         if (count) { state.activeId = state.profiles[state.profiles.length - 1].id; save(); }
-        toast(count ? `${count} perfil(es) importado(s)` : 'El archivo no contiene perfiles válidos');
+        toast(count ? `${count} perfil(es) importado(s)${droppedHealth ? ' · se ignoraron los datos de salud del archivo' : ''}` : cancelled ? 'Importación cancelada' : 'El archivo no contiene perfiles válidos');
         render();
       } catch (e) { toast('Archivo JSON no válido'); }
     };
