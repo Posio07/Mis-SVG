@@ -526,27 +526,61 @@ test('DEC-010: reglas centralizadas con valor, nivel, fuente y fecha de revisió
   assert.equal(R.maxFractionalSetsPerMuscleSession.value, 11);
 });
 
-test('DEC-010: perfiles sin healthGoal ni lesiones generan el mismo plan que antes (salvo exerciseId, bucket y secondary)', () => {
+// Rutas (con "#" por cada índice de lista) en las que dos objetos difieren. Una
+// clave agregada, quitada o con otro valor, o una lista de otro largo, cuenta.
+function diffPaths(a, b, path, out) {
+  if (a && b && typeof a === 'object' && typeof b === 'object') {
+    if (Array.isArray(a) !== Array.isArray(b)) { out.add(path); return out; }
+    if (Array.isArray(a)) {
+      if (a.length !== b.length) { out.add(path + '.length'); return out; }
+      a.forEach((x, i) => diffPaths(x, b[i], path + '.#', out));
+      return out;
+    }
+    new Set(Object.keys(a).concat(Object.keys(b))).forEach(k => diffPaths(a[k], b[k], path + '.' + k, out));
+  } else if (!Object.is(a, b)) out.add(path);
+  return out;
+}
+
+test('el detector de diferencias del test de identidad ve claves agregadas, quitadas, cambiadas, null vs ausente y listas de otro largo', () => {
+  const d = (a, b) => [...diffPaths(a, b, 'x', new Set())].sort();
+  assert.deepEqual(d({ a: 1 }, { a: 1 }), []);
+  assert.deepEqual(d({ a: 1, nueva: 2 }, { a: 1 }), ['x.nueva']);
+  assert.deepEqual(d({ a: 1 }, { a: 1, vieja: 2 }), ['x.vieja']);
+  assert.deepEqual(d({ a: 1 }, { a: 2 }), ['x.a']);
+  assert.deepEqual(d({ a: null }, {}), ['x.a']);
+  assert.deepEqual(d({ l: [1, 2] }, { l: [1] }), ['x.l.length']);
+  assert.deepEqual(d({ l: [{ k: 1 }, { k: 2 }] }, { l: [{ k: 1 }, { k: 3 }] }), ['x.l.#.k']);
+  assert.deepEqual(d({ l: [] }, { l: {} }), ['x.l']);
+});
+
+test('DEC-010: perfiles sin healthGoal ni lesiones generan el mismo plan que antes; solo pueden diferir las rutas de la lista blanca', () => {
   const fx = require('./fixtures/plan-identity-baseline.json');
-  // Campos nuevos desde la línea base: DEC-010 (ejercicios) y DEC-011 (health).
-  const NEW_EXERCISE_FIELDS = ['exerciseId', 'bucket', 'secondary'];
-  const strip = plan => {
-    const p = JSON.parse(JSON.stringify(plan));
-    p.training.sessions.forEach(s => s.exercises.forEach(e => NEW_EXERCISE_FIELDS.forEach(f => { delete e[f]; })));
-    delete p.health.injuryBlockReason;
-    delete p.health.injuryClearance;
-    return p;
+  // Lista blanca EXPLÍCITA de lo que puede diferir de la línea base (capturada con el
+  // motor anterior a DEC-010). Cualquier ruta nueva, quitada o cambiada que no esté acá
+  // hace fallar el test: al agregar una clave al plan hay que decidirlo y listarla.
+  const ALLOWED_DIFFS = {
+    'plan.training.sessions.#.exercises.#.exerciseId': 'DEC-010: id estable por ejercicio',
+    'plan.training.sessions.#.exercises.#.bucket': 'DEC-010: dónde vive el ejercicio',
+    'plan.training.sessions.#.exercises.#.secondary': 'DEC-010: músculos secundarios (peso 0.5)',
+    'plan.health.injuryBlockReason': 'DEC-011: texto de la pausa por lesión (null sin lesiones)',
+    'plan.health.injuryClearance': 'DEC-011: zonas pendientes de autorización (vacío sin lesiones)',
   };
   assert.ok(Object.keys(fx.cases).length >= 10);
+  const seen = new Set();
   Object.entries(fx.cases).forEach(([key, c]) => {
     assert.ok(!c.profile.healthGoal && !c.profile.injuryZones, `${key}: el fixture solo cubre perfiles sin healthGoal ni lesiones`);
     const plan = E.buildPlan(c.profile, fx.today);
-    assert.deepEqual(strip(plan), c.plan, `${key}: el plan cambió respecto de la línea base previa a DEC-010`);
-    // Los campos nuevos de health no pueden bloquear a quien no declaró lesiones.
-    assert.equal(plan.health.injuryBlockReason, null);
-    assert.deepEqual(plan.health.injuryClearance, { required: false, pendingZones: [], evidence: 'E4' });
-    assert.equal(plan.health.blocked, false);
+    diffPaths(plan, c.plan, 'plan', seen);
+    // Las claves permitidas valen "sin efecto" en estos perfiles: nunca pausan ni tocan nada.
+    assert.equal(plan.health.injuryBlockReason, null, `${key}`);
+    assert.deepEqual(plan.health.injuryClearance, { required: false, pendingZones: [], evidence: 'E4' }, `${key}`);
+    assert.equal(plan.health.blocked, false, `${key}`);
   });
+  const unexpected = [...seen].filter(p => !(p in ALLOWED_DIFFS)).sort();
+  assert.deepEqual(unexpected, [], `rutas que difieren de la línea base y NO están en la lista blanca: ${unexpected.join(', ')}`);
+  // La lista blanca no puede quedar vieja: cada ruta listada tiene que diferir de verdad.
+  const stale = Object.keys(ALLOWED_DIFFS).filter(p => !seen.has(p)).sort();
+  assert.deepEqual(stale, [], `rutas de la lista blanca que ya no difieren (quitarlas): ${stale.join(', ')}`);
 });
 
 test('DEC-010: bucket dice dónde vive y muscle es el primario real; coinciden salvo ejercicios sin aporte', () => {
