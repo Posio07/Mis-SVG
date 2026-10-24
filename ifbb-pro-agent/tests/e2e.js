@@ -147,6 +147,77 @@ const server = http.createServer((req, res) => {
   if (srcCount < 15) throw new Error('sources missing');
   await shot('07-sources');
 
+  // DEC-011: lesión declarada → plan en pausa con advertencia y derivación →
+  // confirmación explícita por zona (con fecha) → al agregar otra zona solo se
+  // vuelve a pedir la nueva. Los textos nunca dicen "adaptado a la lesión".
+  await page.click('.tab[data-tab=profiles]');
+  await page.click('#btn-new');
+  await page.fill('input[name=name]', 'Lesión · Test');
+  await page.fill('input[name=age]', '35');
+  await page.fill('input[name=heightCm]', '178');
+  await page.fill('input[name=weightKg]', '85');
+  await page.fill('input[name=neckCm]', '40');
+  await page.fill('input[name=waistCm]', '88');
+  await page.check('input[name=injuryZones][value=shoulder]');
+  await page.click('button[type=submit]');
+  await page.waitForSelector('[data-injury-clearance="shoulder"]');
+  if (await page.$('.subtabs')) throw new Error('con una lesión sin confirmar el plan no debería mostrarse');
+  const pausa = await page.textContent('#view');
+  if (!/Plan en pausa/.test(pausa) || !/no puede adaptar una rutina a una lesión/.test(pausa) || !/Hombro/.test(pausa) || !/E4/.test(pausa)) throw new Error('la pausa por lesión no muestra advertencia + derivación + etiqueta E4: ' + pausa.slice(0, 400));
+  if (/adaptad[oa] a (tu|la) lesi/i.test(pausa)) throw new Error('un texto afirma que la rutina está adaptada a la lesión');
+  await page.click('[data-injury-clearance="shoulder"]');
+  await page.waitForSelector('.subtabs');
+  const clearedHealth = await page.evaluate(() => JSON.parse(localStorage.getItem('ifbb-agent:v1')).profiles.find(p => p.data.name === 'Lesión · Test').data.health);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(clearedHealth.injuries[0].clearanceDate || '')) throw new Error('la autorización no quedó guardada con fecha: ' + JSON.stringify(clearedHealth.injuries));
+  await page.click('[data-pt=training]');
+  const trainingTxt = await page.textContent('#plan-body');
+  if (!/E4/.test(trainingTxt)) throw new Error('el ejercicio sustituto por lesión no muestra la etiqueta E4');
+
+  // DEC-011 · dolor: con 2 sesiones distintas con dolor en las últimas 4 semanas
+  // sobre el press landmine, el Modo sesión reemplaza el ejercicio, avisa que
+  // consulte a un profesional (E4) y el reemplazo NO hereda la etiqueta de
+  // "ejercicio de precaución por lesión" del original.
+  await page.evaluate(() => {
+    const s = JSON.parse(localStorage.getItem('ifbb-agent:v1'));
+    const p = s.profiles.find(x => x.data.name === 'Lesión · Test');
+    const d = n => { const x = new Date(); x.setDate(x.getDate() - n); return x.toISOString().slice(0, 10); };
+    p.painFlags = { shoulder_press_safe: { flagged: true, cleanStreak: 0, lastSessionId: 'b', painSessions: [{ sessionId: 'a', date: d(10) }, { sessionId: 'b', date: d(2) }] } };
+    localStorage.setItem('ifbb-agent:v1', JSON.stringify(s));
+  });
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.click('.tab[data-tab=plan]');
+  await page.waitForSelector('.subtabs');
+  await page.click('[data-pt=training]');
+  const dayIdx = await page.$$eval('[data-toggle-day]', els => els.map(e => e.dataset.toggleDay));
+  let painStarted = false;
+  for (const i of dayIdx) {
+    const has = await page.evaluate(n => { const b = document.getElementById('day-body-' + n); return !!b && /Press landmine/.test(b.textContent); }, i);
+    if (!has) continue;
+    if (await page.getAttribute(`#day-body-${i}`, 'inert') !== null) { await page.click(`[data-toggle-day="${i}"]`); await page.waitForTimeout(400); }
+    await page.click(`#day-body-${i} [data-start-session]`); painStarted = true; break;
+  }
+  if (!painStarted) throw new Error('no se encontró un día con el press landmine para probar el aviso de dolor');
+  await page.waitForSelector('.session-mode');
+  for (let k = 0; k < 12; k++) {
+    if (/Reemplaza a/.test(await page.textContent('.session-mode-body'))) break;
+    if (await page.$('#sm-next')) await page.click('#sm-next'); else break;
+  }
+  const painBody = await page.textContent('.session-mode-body');
+  if (!/Reemplaza a "Press landmine/.test(painBody)) throw new Error('el ejercicio marcado por dolor no se reemplazó');
+  if (!/en 2 sesiones distintas de las últimas 4 semanas/.test(painBody) || !/consultar a un profesional/.test(painBody)) throw new Error('falta el aviso de consultar a un profesional tras 2 sesiones con dolor');
+  if (/Ejercicio incluido como precaución/.test(painBody)) throw new Error('el reemplazo heredó la etiqueta de precaución por lesión del ejercicio original');
+  page.once('dialog', d => d.accept());
+  await page.click('#sm-close');
+  await page.waitForSelector('#session-mode-root', { state: 'detached' });
+  await page.click('.tab[data-tab=profiles]');
+  await page.click('#btn-edit');
+  await page.check('input[name=injuryZones][value=knee]');
+  await page.click('button[type=submit]');
+  await page.waitForSelector('[data-injury-clearance="knee"]');
+  if (await page.$('[data-injury-clearance="shoulder"]')) throw new Error('al agregar una zona no debería volver a pedirse la ya confirmada');
+  const afterAdd = await page.evaluate(() => JSON.parse(localStorage.getItem('ifbb-agent:v1')).profiles.find(p => p.data.name === 'Lesión · Test').data.health.injuries);
+  if (afterAdd.find(i => i.zone === 'shoulder').clearanceDate !== clearedHealth.injuries[0].clearanceDate) throw new Error('se perdió la fecha de la zona ya confirmada');
+
   // Service worker registrado y manifest válido
   const sw = await page.evaluate(async () => { const r = await navigator.serviceWorker.getRegistration(); return !!r; });
   const manifest = await (await page.request.get(base + 'manifest.webmanifest')).json();

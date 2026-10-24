@@ -528,16 +528,24 @@ test('DEC-010: reglas centralizadas con valor, nivel, fuente y fecha de revisió
 
 test('DEC-010: perfiles sin healthGoal ni lesiones generan el mismo plan que antes (salvo exerciseId, bucket y secondary)', () => {
   const fx = require('./fixtures/plan-identity-baseline.json');
+  // Campos nuevos desde la línea base: DEC-010 (ejercicios) y DEC-011 (health).
   const NEW_EXERCISE_FIELDS = ['exerciseId', 'bucket', 'secondary'];
   const strip = plan => {
     const p = JSON.parse(JSON.stringify(plan));
     p.training.sessions.forEach(s => s.exercises.forEach(e => NEW_EXERCISE_FIELDS.forEach(f => { delete e[f]; })));
+    delete p.health.injuryBlockReason;
+    delete p.health.injuryClearance;
     return p;
   };
   assert.ok(Object.keys(fx.cases).length >= 10);
   Object.entries(fx.cases).forEach(([key, c]) => {
     assert.ok(!c.profile.healthGoal && !c.profile.injuryZones, `${key}: el fixture solo cubre perfiles sin healthGoal ni lesiones`);
-    assert.deepEqual(strip(E.buildPlan(c.profile, fx.today)), c.plan, `${key}: el plan cambió respecto de la línea base previa a DEC-010`);
+    const plan = E.buildPlan(c.profile, fx.today);
+    assert.deepEqual(strip(plan), c.plan, `${key}: el plan cambió respecto de la línea base previa a DEC-010`);
+    // Los campos nuevos de health no pueden bloquear a quien no declaró lesiones.
+    assert.equal(plan.health.injuryBlockReason, null);
+    assert.deepEqual(plan.health.injuryClearance, { required: false, pendingZones: [], evidence: 'E4' });
+    assert.equal(plan.health.blocked, false);
   });
 });
 
@@ -587,4 +595,153 @@ test('DEC-010 / DEC-005: el paseo del granjero se agrega aparte, sin descontar s
     });
   });
   assert.ok(carries >= 3, 'el paseo del granjero debería aparecer en los planes con healthGoal');
+});
+
+/* ---------- DEC-011: lesiones (autorización profesional) y aviso por dolor ---------- */
+
+const withInjury = (zones, extra) => Object.assign({}, male, { injuryZones: zones }, extra || {});
+const cleared = (health, zone, date) => { const h = JSON.parse(JSON.stringify(health)); h.injuries.find(i => i.zone === zone).clearanceDate = date; return h; };
+
+test('DEC-011: cualquier zona declarada pausa el plan hasta confirmar la autorización profesional', () => {
+  const plan = E.buildPlan(withInjury(['shoulder']), TODAY);
+  assert.equal(plan.health.blocked, true);
+  assert.deepEqual(plan.health.injuryClearance, { required: true, pendingZones: ['shoulder'], evidence: 'E4' });
+  assert.match(plan.health.injuryBlockReason, /Hombro/);
+  assert.match(plan.health.injuryBlockReason, /no puede adaptar una rutina a una lesión/);
+  assert.match(plan.health.injuryBlockReason, /profesional te haya autorizado/);
+  assert.equal(plan.health.blockReason, null, 'sin síntomas ni condición CV, la pausa es solo por la lesión');
+  // También con diagnóstico y también sin dolor: aplica a cualquier zona declarada.
+  const diagnosed = E.buildPlan(withInjury(['knee'], { injuryDiagnosed: ['knee'] }), TODAY);
+  assert.equal(diagnosed.health.blocked, true);
+  assert.deepEqual(diagnosed.health.injuryClearance.pendingZones, ['knee']);
+});
+
+test('DEC-011: la confirmación es por zona y se guarda con fecha; con todas confirmadas el plan se muestra', () => {
+  const base = E.normalizeProfile(withInjury(['shoulder', 'knee']));
+  const one = Object.assign({}, base, { health: cleared(base.health, 'shoulder', '2026-09-10') });
+  const planOne = E.buildPlan(one, TODAY);
+  assert.equal(planOne.health.blocked, true);
+  assert.deepEqual(planOne.health.injuryClearance.pendingZones, ['knee'], 'solo falta la zona sin confirmar');
+  assert.doesNotMatch(planOne.health.injuryBlockReason, /Hombro/);
+  const both = Object.assign({}, one, { health: cleared(one.health, 'knee', '2026-09-11') });
+  const planBoth = E.buildPlan(both, TODAY);
+  assert.equal(planBoth.health.blocked, false);
+  assert.equal(planBoth.health.injuryBlockReason, null);
+  assert.deepEqual(planBoth.health.injuryClearance.pendingZones, []);
+  assert.equal(planBoth.health.injuries.find(i => i.zone === 'shoulder').clearanceDate, '2026-09-10');
+  // El plan se calcula igual esté pausado o no (la UI decide no mostrarlo).
+  assert.deepEqual(planBoth.training.sessions, E.buildPlan(withInjury(['shoulder', 'knee']), TODAY).training.sessions);
+});
+
+test('DEC-011: lesión y síntomas a la vez muestran las dos causas de pausa', () => {
+  const plan = E.buildPlan(withInjury(['shoulder'], { healthSymptoms: 'on' }), TODAY);
+  assert.equal(plan.health.blocked, true);
+  assert.ok(plan.health.blockReason && plan.health.injuryBlockReason);
+});
+
+test('DEC-011: la autorización se conserva entre ediciones solo en las zonas que siguen declaradas', () => {
+  const stored = E.normalizeProfile(withInjury(['shoulder', 'knee']));
+  stored.health = cleared(cleared(stored.health, 'shoulder', '2026-09-10'), 'knee', '2026-09-11');
+  // El formulario nunca envía clearanceDate: la edición produce null y se reinyecta lo guardado.
+  const edited = E.normalizeProfile(withInjury(['shoulder', 'knee'], { injuryPainNow: ['shoulder'], injuryDiagnosed: ['knee'] }));
+  assert.ok(edited.health.injuries.every(i => i.clearanceDate === null));
+  const kept = E.carryOverInjuryClearances(stored.health, edited.health);
+  assert.deepEqual(kept.injuries.map(i => [i.zone, i.clearanceDate]), [['shoulder', '2026-09-10'], ['knee', '2026-09-11']], 'cambiar diagnóstico o dolor no vuelve a pedirla');
+  assert.equal(kept.injuries[0].painNow, true);
+  // Se agrega una zona: solo esa vuelve a pedirse.
+  const added = E.carryOverInjuryClearances(stored.health, E.normalizeProfile(withInjury(['shoulder', 'knee', 'ankle'])).health);
+  assert.deepEqual(added.injuries.map(i => [i.zone, i.clearanceDate]), [['shoulder', '2026-09-10'], ['knee', '2026-09-11'], ['ankle', null]]);
+  // Se quita una zona y después se vuelve a agregar: pierde la fecha y se vuelve a pedir.
+  const removed = E.carryOverInjuryClearances(stored.health, E.normalizeProfile(withInjury(['shoulder'])).health);
+  assert.deepEqual(removed.injuries.map(i => [i.zone, i.clearanceDate]), [['shoulder', '2026-09-10']]);
+  const readded = E.carryOverInjuryClearances(removed, E.normalizeProfile(withInjury(['shoulder', 'knee'])).health);
+  assert.equal(readded.injuries.find(i => i.zone === 'knee').clearanceDate, null);
+  // Re-normalizar un perfil ya guardado no pierde las fechas.
+  assert.deepEqual(E.normalizeProfile(stored).health.injuries.map(i => i.clearanceDate), ['2026-09-10', '2026-09-11']);
+  // Sin datos previos no inventa fechas.
+  assert.equal(E.carryOverInjuryClearances(undefined, edited.health).injuries[0].clearanceDate, null);
+});
+
+test('DEC-011: ningún texto del motor ni de la interfaz dice que la rutina está adaptada a la lesión; todo es precaución E4', () => {
+  const fs = require('node:fs');
+  const planPending = E.buildPlan(withInjury(['shoulder', 'knee'], { injuryDiagnosed: ['knee'] }), TODAY);
+  const planOk = E.buildPlan(Object.assign({}, E.normalizeProfile(withInjury(['shoulder'])), { health: cleared(E.normalizeProfile(withInjury(['shoulder'])).health, 'shoulder', '2026-09-10') }), TODAY);
+  const texts = [planPending.health.injuryBlockReason, planPending.health.disclaimer, planOk.health.disclaimer]
+    .concat(planPending.warnings.map(w => w.text), planOk.warnings.map(w => w.text));
+  const claim = /adaptad[oa]s? a (tu|la) lesi[oó]n|(plan|rutina) (est[aá] |queda )?adaptad[oa]|(?<!no )adapta(mos)? (el plan|la rutina)|adaptaciones aplican|se excluyen los ejercicios|igual se excluyen/i;
+  texts.forEach(t => assert.doesNotMatch(t, claim, `texto con afirmación de adaptación: ${t}`));
+  // Las precauciones por zona llevan la etiqueta E4 en el dato (la UI la dibuja).
+  const precautions = planOk.warnings.filter(w => /precaución/.test(w.text));
+  assert.equal(precautions.length, 1);
+  assert.equal(precautions[0].evidence, 'E4');
+  assert.match(planOk.health.disclaimer, /E4/);
+  assert.match(planOk.health.disclaimer, /no adapta la rutina/);
+  // Mismo criterio sobre el código fuente de la interfaz y del motor.
+  ['../js/app.js', '../js/engine.js'].forEach(rel => {
+    const src = fs.readFileSync(require('node:path').join(__dirname, rel), 'utf8');
+    assert.doesNotMatch(src, claim, `${rel}: quedó un texto que afirma adaptación a la lesión`);
+  });
+});
+
+test('DEC-011: el sustituto por lesión (shoulder_press_safe) y las exclusiones se etiquetan E4; sin lesión no hay etiqueta', () => {
+  const injured = E.buildPlan(withInjury(['shoulder']), TODAY).training.sessions.flatMap(s => s.exercises);
+  const subs = injured.filter(e => e.injurySubstitute);
+  assert.ok(subs.length >= 1);
+  subs.forEach(e => { assert.equal(e.pattern, 'shoulder_press_safe'); assert.deepEqual(e.injurySubstitute, { zone: 'shoulder', evidence: 'E4' }); });
+  const clean = E.buildPlan(male, TODAY).training.sessions.flatMap(s => s.exercises);
+  assert.ok(clean.every(e => !('injurySubstitute' in e)));
+});
+
+test('DEC-011: aviso de consultar a un profesional con 2 sesiones distintas con dolor >5 en las últimas 4 semanas', () => {
+  const R = K.VALIDATOR_RULES;
+  assert.equal(R.painFlagThreshold.value, 5);
+  assert.equal(R.painAdviceMinSessions.value, 2);
+  assert.equal(R.painAdviceWindowDays.value, 28);
+  ['painFlagThreshold', 'painAdviceMinSessions', 'painAdviceWindowDays'].forEach(k => assert.equal(R[k].level, 'E4'));
+
+  let rec = E.applyPainReading(undefined, 7, 'S1', '2026-09-01');
+  assert.equal(rec.flagged, true);
+  assert.equal(E.painProfessionalAdvice(rec, '2026-09-01').advise, false, 'una sola sesión no alcanza');
+  rec = E.applyPainReading(rec, 8, 'S1', '2026-09-01'); // otra serie de la MISMA sesión
+  assert.equal(rec.painSessions.length, 1, 'dos series de la misma sesión cuentan una vez');
+  assert.equal(E.painProfessionalAdvice(rec, '2026-09-01').advise, false);
+  // Una sesión intermedia sin dolor no corta la cuenta: no tienen que ser seguidas.
+  rec = E.applyPainReading(rec, 2, 'S2', '2026-09-05');
+  rec = E.applyPainReading(rec, 6, 'S3', '2026-09-09');
+  const advice = E.painProfessionalAdvice(rec, '2026-09-09');
+  assert.equal(advice.advise, true);
+  assert.equal(advice.sessions, 2);
+  assert.equal(advice.evidence, 'E4');
+  // Dolor igual al umbral (5) no cuenta: tiene que superarlo.
+  assert.equal(E.painProfessionalAdvice(E.applyPainReading(E.applyPainReading(undefined, 5, 'A', '2026-09-01'), 5, 'B', '2026-09-02'), '2026-09-02').advise, false);
+});
+
+test('DEC-011: la ventana de 4 semanas se cuenta en días (28 inclusive) y las sesiones viejas dejan de contar', () => {
+  let rec = E.applyPainReading(undefined, 9, 'S1', '2026-09-01');
+  rec = E.applyPainReading(rec, 9, 'S2', '2026-09-20');
+  assert.equal(E.painProfessionalAdvice(rec, '2026-09-29').advise, true, 'S1 tiene 28 días: todavía cuenta');
+  assert.equal(E.painProfessionalAdvice(rec, '2026-09-30').advise, false, 'S1 tiene 29 días: ya no cuenta');
+  // El aviso no depende de que la marca de sustitución siga activa.
+  let flagged = E.applyPainReading(undefined, 9, 'S1', '2026-09-01');
+  flagged = E.applyPainReading(flagged, 9, 'S2', '2026-09-08');
+  let unflagged = E.applyPainReading(flagged, 1, 'S3', '2026-09-10');
+  unflagged = E.applyPainReading(unflagged, 1, 'S4', '2026-09-12');
+  assert.equal(unflagged.flagged, false, 'la marca se limpia con 2 sesiones distintas ≤5 (regla de DEC-009 intacta)');
+  assert.equal(E.painProfessionalAdvice(unflagged, '2026-09-12').advise, true);
+  // Se poda el historial viejo al escribir (no crece sin límite).
+  const later = E.applyPainReading(unflagged, 9, 'S5', '2026-11-30');
+  assert.deepEqual(later.painSessions.map(s => s.sessionId), ['S5']);
+});
+
+test('DEC-011: applyPainReading no muta el registro anterior y conserva la regla de DEC-009 (2 sesiones distintas limpias para desmarcar)', () => {
+  const rec0 = Object.freeze({ flagged: true, cleanStreak: 0, lastSessionId: 'S0', painSessions: Object.freeze([]) });
+  const rec1 = E.applyPainReading(rec0, 2, 'S0', '2026-09-01'); // misma sesión: no cuenta para desmarcar
+  assert.equal(rec1.flagged, true); assert.equal(rec1.cleanStreak, 0);
+  const rec2 = E.applyPainReading(rec1, 2, 'S1', '2026-09-02');
+  assert.equal(rec2.flagged, true); assert.equal(rec2.cleanStreak, 1);
+  const rec3 = E.applyPainReading(rec2, 3, 'S2', '2026-09-03');
+  assert.equal(rec3.flagged, false);
+  assert.equal(E.applyPainReading(rec3, 9, 'S3', '2026-09-04').flagged, true, 'dolor >5 vuelve a marcar');
+  // Registros guardados por versiones anteriores (sin painSessions) siguen funcionando.
+  assert.deepEqual(E.painProfessionalAdvice({ flagged: true, cleanStreak: 0, lastSessionId: 'x' }, '2026-09-01'), { advise: false, sessions: 0, evidence: 'E4' });
 });

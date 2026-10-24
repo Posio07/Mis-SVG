@@ -377,10 +377,14 @@
     };
   }
   function makeEntry(ex, bucket, sets) {
-    return Object.assign(exerciseFields(ex, bucket), {
+    const entry = Object.assign(exerciseFields(ex, bucket), {
       name: ex.name, type: ex.type, pattern: ex.pattern || ex.name, unilateral: !!ex.unilateral, sets,
       reps: `${ex.reps[0]}-${ex.reps[1]}`, rir: ex.type === 'compound' ? '2-3' : '1-2', rest: ex.type === 'compound' ? '2-3 min' : '60-90 s',
     });
+    // DEC-011: un ejercicio que solo entra por una lesión declarada es una
+    // precaución heurística (E4), no una adaptación validada.
+    if (ex.injuryOnly) entry.injurySubstitute = { zone: ex.injuryOnly, evidence: 'E4' };
+    return entry;
   }
 
   // DEC-006 (corregido): la "familia" de un ejercicio es su id de patrón
@@ -699,23 +703,37 @@
       }
     }
 
-    // Capa 3 (lesiones): aviso de evaluación profesional cuando no hay
-    // diagnóstico. La exclusión de ejercicios (filterLibByInjuries) ya se
-    // aplicó en computeTraining; acá solo se arma el aviso y el resumen.
+    // Capa 3 (lesiones, DEC-011): no existe un marco validado para adaptar
+    // una rutina a una lesión desde una app. Con CUALQUIER zona declarada
+    // el plan queda en pausa hasta que el usuario confirme, zona por zona,
+    // que un profesional lo autorizó a entrenar (se guarda con fecha en
+    // `clearanceDate`). Recién entonces se muestra el plan, y la exclusión de
+    // ejercicios (filterLibByInjuries, ya aplicada en computeTraining) es solo
+    // una precaución heurística E4, nunca una adaptación a la lesión.
     const injuries = h.injuries || [];
     if (injuries.length) sources.push('SILBERNAGEL_2007');
+    const injuryLabel = zone => (K.INJURY_LABELS && K.INJURY_LABELS[zone]) || zone;
+    const pendingZones = injuries.filter(i => !i.clearanceDate).map(i => i.zone);
+    let injuryBlockReason = null;
+    if (pendingZones.length) {
+      blocked = true;
+      injuryBlockReason = `Declaraste una lesión (${pendingZones.map(injuryLabel).join(', ')}). La app no puede adaptar una rutina a una lesión: no existe un marco validado para hacerlo desde una app. Consultá a un médico o fisioterapeuta antes de entrenar y, cuando un profesional te haya autorizado a entrenar con esa lesión, confirmalo para ver el plan.`;
+    }
     injuries.forEach(inj => {
-      if (!inj.diagnosed) {
-        const label = (K.INJURY_LABELS && K.INJURY_LABELS[inj.zone]) || inj.zone;
-        warnings.push({ level: 'info', text: `${label}: te recomendamos una evaluación profesional; mientras tanto, se excluyen los ejercicios que suelen cargar esta zona.` });
-      }
+      const label = injuryLabel(inj.zone);
+      warnings.push({ level: 'info', evidence: 'E4', text: `${label}: como precaución (E4, heurística), el plan evita algunos ejercicios que suelen cargar esta zona. No es una adaptación de la rutina a tu lesión ni reemplaza la indicación de tu profesional.` });
+      if (!inj.diagnosed) warnings.push({ level: 'info', text: `${label}: te recomendamos una evaluación profesional.` });
     });
+    const injuryClearance = { required: injuries.length > 0, pendingZones, evidence: 'E4' };
 
     const anyCondition = h.screening.cvMetabolicRenal || h.screening.symptoms || h.diabetes.type !== 'none' || injuries.length > 0;
     return {
-      blocked, blockReason, medicalClearanceRecommended, diabetesWarning, weightLossMedWarning,
+      blocked, blockReason, injuryBlockReason, injuryClearance, medicalClearanceRecommended, diabetesWarning, weightLossMedWarning,
       injuries, anyCondition,
-      disclaimer: anyCondition ? 'Estas adaptaciones aplican posicionamientos científicos oficiales y no reemplazan la valoración de un médico, fisioterapeuta o entrenador certificado.' : null,
+      disclaimer: anyCondition
+        ? 'Estos avisos aplican posicionamientos científicos oficiales cuando existen y no reemplazan la valoración de un médico, fisioterapeuta o entrenador certificado.' +
+          (injuries.length ? ' Para lesiones la app no adapta la rutina: solo evita algunos ejercicios de la zona como precaución (E4) una vez que un profesional te autorizó a entrenar.' : '')
+        : null,
       warnings, sources: unique(sources),
     };
   }
@@ -757,7 +775,10 @@
     const zones = unique(toList(src.injuryZones).filter(z => validZones.indexOf(z) !== -1));
     const diagnosedSet = new Set(toList(src.injuryDiagnosed));
     const painSet = new Set(toList(src.injuryPainNow));
-    const injuries = zones.map(zone => ({ zone, diagnosed: diagnosedSet.has(zone), painNow: painSet.has(zone) }));
+    // clearanceDate: el formulario nunca la envía; la fija la pantalla de
+    // pausa al confirmar la autorización profesional y se conserva entre
+    // ediciones con carryOverInjuryClearances (DEC-011).
+    const injuries = zones.map(zone => ({ zone, diagnosed: diagnosedSet.has(zone), painNow: painSet.has(zone), clearanceDate: null }));
     const diabetesType = ['type1', 'type2'].indexOf(src.diabetesType) !== -1 ? src.diabetesType : 'none';
     return {
       screening: {
@@ -769,6 +790,56 @@
       diabetes: { type: diabetesType, medication: !!src.healthDiabetesMed },
       injuries,
     };
+  }
+
+  // DEC-011: al guardar el formulario se reconstruyen las lesiones desde los
+  // campos planos y la autorización de cada zona se perdería. Se conserva la
+  // fecha de las zonas que siguen declaradas; una zona nueva, o una que se
+  // quitó y se volvió a agregar, vuelve a pedirla.
+  function carryOverInjuryClearances(prevHealth, nextHealth) {
+    const prev = {};
+    ((prevHealth && prevHealth.injuries) || []).forEach(i => { if (i.clearanceDate) prev[i.zone] = i.clearanceDate; });
+    return Object.assign({}, nextHealth, {
+      injuries: (nextHealth.injuries || []).map(i => Object.assign({}, i, { clearanceDate: prev[i.zone] || i.clearanceDate || null })),
+    });
+  }
+
+  /* ---------- DEC-009 / DEC-011: dolor en Modo sesión ---------- */
+
+  const daysBetweenIso = (fromIso, toIso) => Math.round((Date.parse(toIso) - Date.parse(fromIso)) / 86400000);
+  const recentPainSessions = (rec, today) => ((rec && rec.painSessions) || []).filter(s => {
+    const age = daysBetweenIso(s.date, today);
+    return age >= 0 && age <= K.VALIDATOR_RULES.painAdviceWindowDays.value;
+  });
+
+  // Registra una lectura de dolor sobre el registro de un patrón y devuelve el
+  // registro nuevo (no muta el anterior). Conserva la regla de DEC-009 (dolor
+  // por encima del umbral marca; se desmarca con 2 sesiones DISTINTAS
+  // seguidas sin pasarse) y suma el historial de sesiones con dolor para el
+  // aviso de DEC-011.
+  function applyPainReading(rec, pain, sessionId, today) {
+    const prev = rec || {};
+    const next = { flagged: !!prev.flagged, cleanStreak: prev.cleanStreak || 0, lastSessionId: prev.lastSessionId || null, painSessions: (prev.painSessions || []).slice() };
+    const newSession = next.lastSessionId !== sessionId;
+    if (pain > K.VALIDATOR_RULES.painFlagThreshold.value) {
+      next.flagged = true; next.cleanStreak = 0;
+      if (!next.painSessions.some(s => s.sessionId === sessionId)) next.painSessions.push({ sessionId, date: today });
+    } else if (next.flagged && newSession) {
+      next.cleanStreak += 1;
+      if (next.cleanStreak >= 2) { next.flagged = false; next.cleanStreak = 0; }
+    }
+    next.lastSessionId = sessionId;
+    next.painSessions = recentPainSessions(next, today);
+    return next;
+  }
+
+  // DEC-011 (E4): ¿recomendar consultar a un profesional? Sí si el patrón
+  // tuvo dolor por encima del umbral en 2 o más sesiones DISTINTAS dentro de
+  // las últimas 4 semanas, no necesariamente seguidas. Independiente de si la
+  // marca de sustitución sigue activa.
+  function painProfessionalAdvice(rec, today) {
+    const sessions = recentPainSessions(rec, today).length;
+    return { advise: sessions >= K.VALIDATOR_RULES.painAdviceMinSessions.value, sessions, evidence: 'E4' };
   }
 
   function normalizeProfile(src) {
@@ -815,5 +886,5 @@
 
   function unique(arr) { return arr.filter((v, i) => v && arr.indexOf(v) === i); }
 
-  return { bmrMifflin, bmrKatch, bodyFatNavy, ffmi, classicLimit, computeMetrics, computeTargets, computeNutrition, computeTraining, computeHealthScreen, buildPlan, normalizeProfile, validateProfile, exerciseFields, SPLITS, LB_PER_KG };
+  return { bmrMifflin, bmrKatch, bodyFatNavy, ffmi, classicLimit, computeMetrics, computeTargets, computeNutrition, computeTraining, computeHealthScreen, buildPlan, normalizeProfile, validateProfile, exerciseFields, carryOverInjuryClearances, applyPainReading, painProfessionalAdvice, SPLITS, LB_PER_KG };
 });

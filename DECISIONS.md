@@ -94,6 +94,7 @@ Este archivo es la fuente de verdad de la lógica de negocio. Antes de cambiar c
 - La app NO reemplaza ni emula a un médico, fisioterapeuta ni entrenador certificado.
 - Solo adapta el plan cuando hay una regla de un posicionamiento oficial o algoritmo validado cargado en este archivo.
 - Si una condición declarada no tiene regla cargada, la app NO ajusta nada: muestra "Consultá con un profesional antes de seguir este plan" y registra la condición.
+- *Precisión por DEC-011:* "adaptar" aplica al tamizaje y a diabetes (posicionamientos oficiales). Para lesiones no existe un marco validado: la app no adapta la rutina, exige autorización profesional y solo evita ejercicios como precaución E4.
 
 ## DEC-009 · Condiciones de salud y lesiones
 
@@ -141,6 +142,8 @@ El plan de la app se considera de intensidad vigorosa a estos efectos. Lógica:
 Visible en el perfil y en el plan cuando haya cualquier condición declarada (tamizaje con aviso, diabetes o alguna lesión):
 > "Estas adaptaciones aplican posicionamientos científicos oficiales y no reemplazan la valoración de un médico, fisioterapeuta o entrenador certificado."
 
+**Reemplazado por DEC-011:** el texto de arriba afirmaba "adaptaciones" y ya no se usa. Para lesiones, la app no adapta la rutina; ver DEC-011 para el texto vigente y el flujo de autorización profesional.
+
 ### Tests
 - Síntomas (c) = sí → el plan queda oculto hasta marcar la autorización médica.
 - Diabetes con insulina → aparece el aviso de hipoglucemia; ningún número del plan (series, calorías, macros) cambia.
@@ -162,3 +165,38 @@ Contexto: `docs/specs/validador.md` (23-oct-2026). El validador necesita contar 
 - Tests: tabla completa y sin filas huérfanas; correcciones aprobadas; ids y nombres únicos; reglas bien formadas; identidad contra una línea base capturada con el motor anterior (10 perfiles sin `healthGoal` ni lesiones, salvo `exerciseId`/`bucket`/`secondary`); paseo del granjero sin descuento y con volumen semanal intacto.
 
 **Estado: implementada (Fase 1).** Todavía no hay validación ni recortes: esta decisión solo prepara los datos.
+
+## DEC-011 · Lesiones: autorización profesional por zona, precauciones E4 y aviso por dolor
+Contexto: `docs/specs/validador.md`, R5: "Lesiones musculoesqueléticas: no hay un framework validado para adaptar la rutina desde una app. Se advierte, se deriva a un profesional y solo se genera la rutina tras confirmación explícita de que un profesional autorizó el entrenamiento. Nunca: generar como si la condición no existiera, ni fingir una adaptación." Esta decisión reencuadra la Capa 3 de DEC-009 (que hablaba de "adaptar") sin cambiar el mapa de exclusiones.
+
+### Flujo con cualquier zona declarada
+1. **Advertencia:** el plan queda en pausa ("Plan en pausa", mismo patrón que la Capa 1 de DEC-009). El texto dice que la app no puede adaptar una rutina a una lesión porque no existe un marco validado.
+2. **Derivación:** se indica consultar a un médico o fisioterapeuta.
+3. **Confirmación explícita, una vez por zona:** "¿Un profesional te autorizó a entrenar con esta lesión?". Cada confirmación se guarda con fecha (`health.injuries[].clearanceDate`, formato `AAAA-MM-DD`).
+- Aplica a cualquier zona, tenga o no diagnóstico profesional y marque o no dolor actual.
+- Se vuelve a pedir si se **agrega** una zona (solo la nueva) o si una zona se quita y se vuelve a agregar. Editar el diagnóstico o el dolor actual de una zona que sigue declarada no la vuelve a pedir. La fecha se conserva entre ediciones del perfil (`carryOverInjuryClearances`, porque el formulario reconstruye las lesiones desde campos planos).
+- Con síntomas (Capa 1) y lesión a la vez, la pantalla muestra las dos causas de pausa.
+- Los perfiles que ya tenían una lesión declarada desde DEC-009 no tienen `clearanceDate`: se les pide la confirmación una vez, sin migración.
+- El motor calcula el plan igual esté pausado o no (`buildPlan` es puro); es la interfaz la que decide no mostrarlo. Las sesiones solo se inician desde la vista del plan.
+
+### Precauciones E4
+- **Exclusiones por zona** (mapa de DEC-009, sin cambios): se aplican después de la autorización y son una **precaución heurística E4** (criterio de la app, sin fuente). Un aviso `{ evidence: 'E4' }` por zona lo dice en el plan, con la etiqueta visible "E4 · heurística".
+- **Sustituto `shoulder_press_safe`:** también E4. El ejercicio del plan lleva `injurySubstitute: { zone, evidence: 'E4' }` y se muestra con la etiqueta. Un reemplazo por dolor (Capa B) NO hereda esa marca del ejercicio original: solo la lleva si el reemplazo es, a su vez, un ejercicio `injuryOnly`.
+- **Texto de la interfaz:** ninguno puede decir que la rutina está adaptada a la lesión. Texto vigente del plan con condiciones: *"Estos avisos aplican posicionamientos científicos oficiales cuando existen y no reemplazan la valoración de un médico, fisioterapeuta o entrenador certificado."* + (con lesiones) *"Para lesiones la app no adapta la rutina: solo evita algunos ejercicios de la zona como precaución (E4) una vez que un profesional te autorizó a entrenar."* Reescritos también el texto de ayuda de Salud y el de lesiones del formulario.
+
+### Dolor en Modo sesión (Capa B de DEC-009), aviso E4
+- Se conserva la regla de DEC-009: dolor por encima del umbral marca el patrón para sustituir; se desmarca con 2 sesiones DISTINTAS seguidas sin pasarse. La lógica pasó a funciones puras de `engine.js` (`applyPainReading`, `painProfessionalAdvice`), testeadas, sin cambiar su comportamiento.
+- **Aviso nuevo:** si un patrón tuvo dolor por encima del umbral en **2 o más sesiones distintas dentro de las últimas 4 semanas** (no necesariamente seguidas), el Modo sesión recomienda consultar a un profesional antes de seguir cargando ese movimiento. Etiqueta E4. Se evalúa sobre el patrón original del plan, haya sido sustituido o no, e independientemente de si la marca de sustitución sigue activa.
+- Dos series con dolor de la misma sesión cuentan una vez. "Últimas 4 semanas" = 28 días hacia atrás, inclusive (a los 29 días la sesión deja de contar). El registro por patrón guarda `painSessions: [{ sessionId, date }]` y poda lo que sale de la ventana.
+- Valores en `VALIDATOR_RULES`, todos E4: `painFlagThreshold` (5, con la fuente de Silbernagel 2007 ya citada en DEC-009), `painAdviceMinSessions` (2), `painAdviceWindowDays` (28).
+
+### Tests
+- Lesión declarada sin confirmar → plan pausado, con advertencia y derivación; con diagnóstico o sin él.
+- Confirmación por zona con fecha: con una de dos zonas confirmadas, solo falta la otra; con todas, el plan se muestra.
+- La fecha se conserva al editar; se vuelve a pedir al agregar una zona o al quitarla y volver a agregarla.
+- Ningún texto del motor ni del código de la interfaz afirma adaptación a la lesión (detector probado contra los textos viejos); las precauciones llevan `evidence: 'E4'`.
+- Aviso por dolor: 2 sesiones distintas dentro de 28 días (no seguidas); una sesión o dos series de la misma sesión no alcanzan; dolor igual al umbral no cuenta; el día 28 cuenta y el 29 no; sin mutar el registro anterior.
+- Sin lesiones declaradas el plan no cambia y nunca se pausa (identidad contra la línea base).
+- E2E en navegador: pausa → confirmación → fecha guardada → etiqueta E4 → al agregar una zona solo se pide la nueva; aviso de dolor y reemplazo sin heredar la etiqueta de precaución.
+
+**Estado: implementada (Fase 1b).**

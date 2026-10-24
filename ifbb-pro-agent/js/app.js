@@ -233,6 +233,7 @@
       <div class="injury-sub" style="padding-left:1.7rem;display:${checked ? 'flex' : 'none'};gap:1.1rem;flex-wrap:wrap;margin:0 0 .6rem">
         <label style="display:flex;align-items:center;gap:.4rem;font-size:.82rem;color:var(--acero)"><input type="checkbox" name="injuryDiagnosed" value="${zone}" style="width:auto" ${inj && inj.diagnosed ? 'checked' : ''}> Diagnóstico profesional</label>
         <label style="display:flex;align-items:center;gap:.4rem;font-size:.82rem;color:var(--acero)"><input type="checkbox" name="injuryPainNow" value="${zone}" style="width:auto" ${inj && inj.painNow ? 'checked' : ''}> Dolor actualmente</label>
+        ${inj && inj.clearanceDate ? `<span style="font-size:.78rem;color:var(--acero)">Autorización profesional registrada el ${esc(inj.clearanceDate)}</span>` : ''}
       </div>
     </div>`;
   }
@@ -328,7 +329,7 @@
         </fieldset>
         <fieldset>
           <legend>Salud</legend>
-          <p class="help">La app NO reemplaza a un médico, fisioterapeuta ni entrenador certificado: solo adapta el plan cuando hay una regla con respaldo científico cargada (DEC-009). Si declarás una condición sin regla cargada, queda registrada pero no cambia nada.</p>
+          <p class="help">La app NO reemplaza a un médico, fisioterapeuta ni entrenador certificado. El tamizaje y los avisos de diabetes aplican posicionamientos oficiales. Para lesiones la app no adapta la rutina: te pide la autorización de un profesional y solo evita, como precaución (E4), algunos ejercicios de la zona. Una condición sin regla cargada queda registrada y no cambia nada.</p>
           <label style="display:flex;align-items:center;gap:.5rem"><input type="checkbox" name="healthRegularExercise" style="width:auto" ${h.screening.regularExercise ? 'checked' : ''}> Hago ejercicio planificado ≥30 min, 3 días/semana, desde hace al menos 3 meses</label>
           <label style="display:flex;align-items:center;gap:.5rem"><input type="checkbox" name="healthCvMetabolicRenal" style="width:auto" ${h.screening.cvMetabolicRenal ? 'checked' : ''}> Tengo diagnóstico de enfermedad cardiovascular, metabólica (diabetes) o renal</label>
           <label style="display:flex;align-items:center;gap:.5rem"><input type="checkbox" name="healthSymptoms" style="width:auto" ${h.screening.symptoms ? 'checked' : ''}> Tengo dolor/molestia en el pecho, falta de aire en reposo o con poco esfuerzo, mareo o desmayo, palpitaciones, hinchazón de tobillos, dolor en las piernas al caminar, soplo cardíaco conocido o fatiga inusual</label>
@@ -345,7 +346,7 @@
 
           <label style="margin-top:.8rem">Lesiones (marcá la zona si tenés una)</label>
           <div id="injury-zones">${KNOWLEDGE.INJURY_ZONES.map(z => injuryZoneRow(z, KNOWLEDGE.INJURY_LABELS[z], injuriesByZone[z])).join('')}</div>
-          <p class="help">Sin diagnóstico profesional, igual se excluyen los ejercicios que suelen cargar esa zona; te recomendamos una evaluación. En Modo sesión vas a poder registrar el dolor de cada serie que la involucre.</p>
+          <p class="help">Con cualquier zona marcada, el plan queda en pausa hasta que confirmes que un profesional te autorizó a entrenar con esa lesión (se pide una vez por zona y se vuelve a pedir si agregás otra). Como precaución (E4) se evitan algunos ejercicios de la zona: no es una adaptación a tu lesión. En Modo sesión podés registrar el dolor de cada serie que la involucre.</p>
 
           ${hasHealthData ? '<div class="btn-row"><button type="button" class="btn btn-danger" id="btn-clear-health">Borrar datos de salud</button></div>' : ''}
         </fieldset>
@@ -399,6 +400,7 @@
       const errors = ENGINE.validateProfile(data);
       if (errors.length) { $('#form-errors').innerHTML = errors.map(x => `<div class="alert danger">${esc(x)}</div>`).join(''); window.scrollTo({ top: document.body.scrollHeight }); return; }
       const norm = ENGINE.normalizeProfile(data);
+      norm.health = ENGINE.carryOverInjuryClearances(editing && editing.data.health, norm.health); // DEC-011
       if (editing) { editing.data = norm; editing.updatedAt = todayIso(); state.activeId = editing.id; }
       else {
         const p = { id: uid(), createdAt: todayIso(), updatedAt: todayIso(), data: norm, log: [] };
@@ -442,23 +444,45 @@
    * igual calculó el plan completo (buildPlan es puro); acá se decide no
    * mostrarlo hasta que el usuario marque la autorización médica. */
   function htmlHealthBlock(plan) {
+    const h = plan.health;
+    const screeningBlocked = !!h.blockReason;
+    // Mismo patrón para las dos causas de pausa: advertencia → derivación a un
+    // profesional → confirmación explícita. Las lesiones piden la confirmación
+    // zona por zona (DEC-011).
+    const screeningPart = screeningBlocked ? `
+        <div class="alert danger">${esc(h.blockReason)}</div>
+        <p class="muted">Esto no es un diagnóstico: es el resultado del tamizaje previo al ejercicio (ACSM/Riebe 2015) que completaste en Datos. Si ya consultaste y tenés autorización para entrenar a intensidad vigorosa, marcala para continuar.</p>
+        <div class="btn-row"><button class="btn btn-primary" id="btn-medical-clearance">Tengo autorización médica</button></div>` : '';
+    const injuryPart = h.injuryBlockReason ? `
+        <div class="alert danger">${esc(h.injuryBlockReason)} ${evTag('E4')}</div>
+        <p class="muted">Derivación: un médico o fisioterapeuta puede decirte si podés entrenar y cómo. La app no reemplaza esa valoración.</p>
+        ${h.injuryClearance.pendingZones.map(z => `
+        <div class="card" style="margin:.5rem 0">
+          <strong>${esc(KNOWLEDGE.INJURY_LABELS[z] || z)}</strong>
+          <p class="muted" style="margin:.3rem 0">¿Un profesional te autorizó a entrenar con esta lesión? Se guarda con la fecha de hoy.</p>
+          <button class="btn btn-primary" data-injury-clearance="${esc(z)}">Sí, un profesional me autorizó</button>
+        </div>`).join('')}` : '';
     return `
       <div class="card accent" style="border-color:var(--peligro)">
         <h2>Plan en pausa</h2>
-        <div class="alert danger">${esc(plan.health.blockReason)}</div>
-        <p class="muted">Esto no es un diagnóstico: es el resultado del tamizaje previo al ejercicio (ACSM/Riebe 2015) que completaste en Datos. Si ya consultaste y tenés autorización para entrenar a intensidad vigorosa, marcala para continuar.</p>
-        <div class="btn-row">
-          <button class="btn btn-primary" id="btn-medical-clearance">Tengo autorización médica</button>
-          <button class="btn" id="btn-edit-health">Revisar mis respuestas</button>
-        </div>
+        ${screeningPart}
+        ${injuryPart}
+        <div class="btn-row"><button class="btn" id="btn-edit-health">Revisar mis respuestas</button></div>
       </div>`;
   }
   function wireHealthBlock(profile) {
-    $('#btn-medical-clearance').onclick = () => {
+    const med = $('#btn-medical-clearance');
+    if (med) med.onclick = () => {
       profile.data.health = profile.data.health || { screening: {}, diabetes: { type: 'none' }, injuries: [] };
       profile.data.health.screening.medicalClearance = true;
       profile.updatedAt = todayIso(); save(); toast('Autorización registrada'); renderPlan();
     };
+    view.querySelectorAll('[data-injury-clearance]').forEach(btn => btn.onclick = () => {
+      const inj = ((profile.data.health && profile.data.health.injuries) || []).find(i => i.zone === btn.dataset.injuryClearance);
+      if (!inj) return;
+      inj.clearanceDate = todayIso();
+      profile.updatedAt = todayIso(); save(); toast('Autorización registrada'); renderPlan();
+    });
     $('#btn-edit-health').onclick = () => { ui.editingId = profile.id; go('data'); };
   }
 
@@ -479,7 +503,10 @@
     });
   }
 
-  function alerts(list) { return list.map(w => `<div class="alert ${w.level}">${esc(w.text)}</div>`).join(''); }
+  // DEC-011: etiqueta de nivel de evidencia visible junto a avisos y ejercicios
+  // que son precauciones heurísticas.
+  function evTag(level) { return `<span class="ev-tag">${esc(level)} · heurística</span>`; }
+  function alerts(list) { return list.map(w => `<div class="alert ${w.level}">${esc(w.text)}${w.evidence ? ' ' + evTag(w.evidence) : ''}</div>`).join(''); }
 
   function htmlSummary(plan, profile) {
     const m = plan.metrics, t = plan.targets, n = plan.nutrition, tr = plan.training;
@@ -609,7 +636,7 @@
   function htmlExRow(e, extraClass, label, reps, setsLabel, showTag) {
     return `<div class="ex-row ${extraClass}">
       <div class="ex-main">
-        <div class="ex-name">${esc(label != null ? label : e.name)}${showTag ? ' <span class="ex-tag">Top set</span>' : ''}</div>
+        <div class="ex-name">${esc(label != null ? label : e.name)}${showTag ? ' <span class="ex-tag">Top set</span>' : ''}${e.injurySubstitute ? ' ' + evTag(e.injurySubstitute.evidence) : ''}</div>
         <div class="ex-fields">
           <span class="f">${esc(e.muscleLabel)}</span>
           <span class="f">${icon('gauge')} RIR ${esc(showTag ? e.topSet.rir : e.rir)}</span>
@@ -878,8 +905,12 @@
         // DEC-010: la lista de sustitutos sale del bucket donde vive el
         // ejercicio; el sustituto trae su propia identidad y aporte.
         const alt = findPainSubstitute(e.pattern, e.bucket, zones, profile);
-        if (alt) { substitutedFrom = e.name; ex = Object.assign({}, e, ENGINE.exerciseFields(alt, e.bucket), { name: alt.name, pattern: alt.pattern, reps: `${alt.reps[0]}-${alt.reps[1]}`, topSet: null, backoffSets: 0 }); }
+        if (alt) { substitutedFrom = e.name; ex = Object.assign({}, e, ENGINE.exerciseFields(alt, e.bucket), { name: alt.name, pattern: alt.pattern, reps: `${alt.reps[0]}-${alt.reps[1]}`, topSet: null, backoffSets: 0, injurySubstitute: alt.injuryOnly ? { zone: alt.injuryOnly, evidence: 'E4' } : null }); }
       }
+      // DEC-011 (E4): dolor por encima del umbral en 2+ sesiones distintas de
+      // las últimas 4 semanas en el patrón ORIGINAL del plan (aunque haya sido
+      // sustituido) → recomendar consultar a un profesional.
+      const painAdvice = ENGINE.painProfessionalAdvice(flags[e.pattern], todayIso());
       const sets = [];
       if (ex.topSet) {
         sets.push({ setType: 'top', setNumber: 1, repsLabel: ex.topSet.reps, restLabel: '3 min' });
@@ -891,6 +922,8 @@
         name: ex.name, exerciseId: ex.exerciseId, bucket: ex.bucket, muscle: ex.muscle, muscleLabel: ex.muscleLabel, type: ex.type, pattern: ex.pattern, unilateral: ex.unilateral,
         durationMin: exerciseDurationMin(ex), sets, substitutedFrom,
         painScale: injuryAffectsMuscle(ex.bucket, zones),
+        injurySubstitute: ex.injurySubstitute || null,
+        painAdvice: painAdvice.advise ? { sessions: painAdvice.sessions, name: e.name } : null,
       };
     });
   }
@@ -951,7 +984,9 @@
         <div class="session-mode-body">
           <h2 class="sm-exname">${esc(ex.name)}</h2>
           <div class="sm-exmeta">${esc(ex.muscleLabel)} ${sm.short ? `· ~${ex.durationMin} min` : ''}</div>
-          ${ex.substitutedFrom ? `<div class="alert warn">Reemplaza a "${esc(ex.substitutedFrom)}" por el dolor registrado la vez pasada. Te sugerimos consultar a un profesional.</div>` : ''}
+          ${ex.substitutedFrom ? `<div class="alert warn">Reemplaza a "${esc(ex.substitutedFrom)}" por el dolor registrado la vez pasada. Te sugerimos consultar a un profesional. ${evTag('E4')}</div>` : ''}
+          ${ex.painAdvice ? `<div class="alert danger">Registraste dolor por encima del umbral en "${esc(ex.painAdvice.name)}" en ${ex.painAdvice.sessions} sesiones distintas de las últimas 4 semanas. Te recomendamos consultar a un profesional antes de seguir cargando ese movimiento. ${evTag('E4')}</div>` : ''}
+          ${ex.injurySubstitute ? `<div class="alert info">Ejercicio incluido como precaución por la zona declarada: no es una adaptación a tu lesión. ${evTag('E4')}</div>` : ''}
           ${htmlExerciseImage(ex)}
           ${last ? `<div class="sm-last ${last.sets.some(s => s.setType === 'top') ? 'sm-last-top' : ''}">
             <b>Última vez</b> (${fmtDate(last.date)}): ${last.sets.map(s => `${s.setType === 'top' ? icon('trophy') + ' ' : ''}<span class="v">${n1(s.weight)} ${profile.data.plateUnit || 'kg'} × ${s.reps}</span>`).join(' · ')}
@@ -1003,15 +1038,9 @@
   // desmarca después de 2 sesiones DISTINTAS seguidas sin pasarse de 5.
   function logPain(profile, pattern, pain) {
     profile.painFlags = profile.painFlags || {};
-    const rec = profile.painFlags[pattern] || { flagged: false, cleanStreak: 0, lastSessionId: null };
-    const newSession = rec.lastSessionId !== sm.sessionId;
-    if (pain > 5) { rec.flagged = true; rec.cleanStreak = 0; }
-    else if (rec.flagged && newSession) {
-      rec.cleanStreak = (rec.cleanStreak || 0) + 1;
-      if (rec.cleanStreak >= 2) { rec.flagged = false; rec.cleanStreak = 0; }
-    }
-    rec.lastSessionId = sm.sessionId;
-    profile.painFlags[pattern] = rec;
+    // DEC-011: la lógica vive en engine.js (pura y testeada); además de la marca
+    // guarda las sesiones con dolor para el aviso de consultar a un profesional.
+    profile.painFlags[pattern] = ENGINE.applyPainReading(profile.painFlags[pattern], pain, sm.sessionId, todayIso());
   }
 
   function smLogSet(profile, setIdx) {

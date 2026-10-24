@@ -529,6 +529,10 @@
     minHistoryWeeksForRamp: rule(2, 'E4', null, { note: 'Con menos de 2 semanas de historial es usuario nuevo; con 2 o 3 se compara contra el promedio de las semanas disponibles.' }),
     // R4 · duración derivada
     setExecutionSeconds: rule(45, 'E4', null, { assumption: true, note: 'Valor inicial fijo (transición + ejecución por serie), supuesto: se calibrará con los tiempos reales del modo sesión.' }),
+    // DEC-009 / DEC-011 · dolor en Modo sesión (escala 0-10)
+    painFlagThreshold: rule(5, 'E4', { label: 'Silbernagel et al. 2007 (Br J Sports Med): ≤5/10 sin empeorar al día siguiente = carga aceptable (modelo de tendinopatías, extendido a otras zonas por criterio de la app)', url: 'https://pubmed.ncbi.nlm.nih.gov/17224440/' }),
+    painAdviceMinSessions: rule(2, 'E4', null, { note: 'Sesiones DISTINTAS con dolor por encima del umbral en el mismo patrón, no necesariamente seguidas.' }),
+    painAdviceWindowDays: rule(28, 'E4', null, { note: 'Últimas 4 semanas, contadas en días (28 días hacia atrás, inclusive).' }),
     // DEC-003 v2 · tope de series por sesión (aviso no bloqueante)
     sessionSetCap: rule(25, 'E4', null, { reviewRequired: true, note: 'Criterio de la app sin fuente: marcado para revisión.' }),
   };
