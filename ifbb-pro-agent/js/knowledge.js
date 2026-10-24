@@ -533,6 +533,9 @@
     painFlagThreshold: rule(5, 'E4', { label: 'Silbernagel et al. 2007 (Br J Sports Med): ≤5/10 sin empeorar al día siguiente = carga aceptable (modelo de tendinopatías, extendido a otras zonas por criterio de la app)', url: 'https://pubmed.ncbi.nlm.nih.gov/17224440/' }),
     painAdviceMinSessions: rule(2, 'E4', null, { note: 'Sesiones DISTINTAS con dolor por encima del umbral en el mismo patrón, no necesariamente seguidas.' }),
     painAdviceWindowDays: rule(28, 'E4', null, { note: 'Últimas 4 semanas, contadas en días (28 días hacia atrás, inclusive).' }),
+    // DEC-005 / DEC-010 · series del ejercicio funcional que no aporta volumen
+    // de hipertrofia (paseo del granjero). Se agregan aparte, sin descontar.
+    functionalNoVolumeExtraSets: rule(2, 'E4', null, { reviewRequired: true, note: 'Criterio de la app sin fuente: marcado para revisión.' }),
     // DEC-003 v2 · tope de series por sesión (aviso no bloqueante)
     sessionSetCap: rule(25, 'E4', null, { reviewRequired: true, note: 'Criterio de la app sin fuente: marcado para revisión.' }),
   };

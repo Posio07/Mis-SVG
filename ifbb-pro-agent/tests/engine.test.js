@@ -918,3 +918,43 @@ test('DEC-011: reconcileInjuryClearances no muta sus entradas, tolera no tener e
   const noChange = E.normalizeProfile(withInjury(['shoulder']));
   assert.deepEqual(E.reconcileInjuryClearances(stored.health, noChange.health), E.carryOverInjuryClearances(stored.health, noChange.health));
 });
+
+/* ---------- DEC-010: series del paseo del granjero en la configuración ---------- */
+
+test('DEC-010: las series del paseo del granjero viven en VALIDATOR_RULES con el mismo formato que SESSION_SET_CAP', () => {
+  const cap = K.VALIDATOR_RULES.sessionSetCap, carry = K.VALIDATOR_RULES.functionalNoVolumeExtraSets;
+  assert.ok(carry, 'falta la regla functionalNoVolumeExtraSets');
+  assert.equal(carry.value, 2);
+  assert.equal(carry.level, 'E4');
+  assert.equal(carry.source, null);
+  assert.equal(carry.reviewRequired, true);
+  assert.match(carry.reviewedAt, /^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(carry.verifiedAgainstPrimarySource, false);
+  assert.ok(carry.note);
+  assert.deepEqual(Object.keys(carry).sort(), Object.keys(cap).sort(), 'mismas claves que sessionSetCap');
+});
+
+test('DEC-010: el motor lee las series del paseo del granjero desde VALIDATOR_RULES (cambiar el valor cambia el plan; con el valor actual, no)', () => {
+  const rule = K.VALIDATOR_RULES.functionalNoVolumeExtraSets;
+  const original = rule.value;
+  const planWith = value => {
+    rule.value = value;
+    try { return E.buildPlan(Object.assign({}, male, { healthGoal: true }), TODAY); } finally { rule.value = original; }
+  };
+  const carries = plan => plan.training.sessions.flatMap(s => s.exercises).filter(e => e.exerciseId === 'functional.farmer_carry');
+  const others = plan => plan.training.sessions.map(s => s.exercises.filter(e => e.exerciseId !== 'functional.farmer_carry'));
+  const base = planWith(original), three = planWith(3), one = planWith(1);
+  assert.ok(carries(base).length >= 1);
+  assert.ok(carries(base).every(e => e.sets === 2), 'con el valor actual, 2 series (salida sin cambios)');
+  assert.ok(carries(three).every(e => e.sets === 3), 'con valor 3 el motor tiene que usar 3 series');
+  assert.ok(carries(one).every(e => e.sets === 1));
+  // Sin descontar de nadie: el resto de los ejercicios no cambia aunque cambie el valor.
+  assert.deepEqual(others(three), others(base));
+  assert.deepEqual(others(one), others(base));
+  // Y el total de series de los días con paseo sí refleja el valor (cuenta en totalSets).
+  base.training.sessions.forEach((s, i) => {
+    const n = s.exercises.filter(e => e.exerciseId === 'functional.farmer_carry').length;
+    assert.equal(three.training.sessions[i].totalSets - s.totalSets, n, 'cada paseo suma 1 serie más');
+  });
+  assert.equal(rule.value, original, 'el test restauró el valor');
+});

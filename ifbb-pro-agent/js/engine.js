@@ -17,9 +17,6 @@
   const SESSION_SET_CAP = K.VALIDATOR_RULES.sessionSetCap.value;
   const SET_EXEC_SEC = K.VALIDATOR_RULES.setExecutionSeconds.value;
   const FUNCTIONAL_LABEL = 'Funcional';
-  // DEC-010: series del ejercicio funcional sin aporte de volumen (paseo del
-  // granjero). Se agregan aparte; no se descuentan de ningún aislamiento.
-  const NO_VOLUME_EXTRA_SETS = 2;
 
   const round = (v, d = 0) => { const m = Math.pow(10, d); return Math.round(v * m) / m; };
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -522,7 +519,8 @@
           const bonusPattern = bonus.pattern || bonus.name;
           const alreadyThere = exercises.some(e => (e.pattern || e.name) === bonusPattern);
           if (K.EXERCISE_CONTRIBUTION[bonus.id].primary === null) {
-            if (!alreadyThere) exercises.push(makeEntry(bonus, mu, NO_VOLUME_EXTRA_SETS));
+            // Series desde la configuración (VALIDATOR_RULES.functionalNoVolumeExtraSets).
+            if (!alreadyThere) exercises.push(makeEntry(bonus, mu, K.VALIDATOR_RULES.functionalNoVolumeExtraSets.value));
           } else {
             // Donante: el pick de este músculo ese día con más series de sobra
             // (prioriza aislamientos). Se prueba con 2 series y, si no entra,
