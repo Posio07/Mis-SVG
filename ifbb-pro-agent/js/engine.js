@@ -13,6 +13,14 @@
   const LB_PER_KG = 2.20462;
   const CM_PER_IN = 2.54;
 
+  // DEC-010: valores de reglas centralizados en knowledge.js (VALIDATOR_RULES).
+  const SESSION_SET_CAP = K.VALIDATOR_RULES.sessionSetCap.value;
+  const SET_EXEC_SEC = K.VALIDATOR_RULES.setExecutionSeconds.value;
+  const FUNCTIONAL_LABEL = 'Funcional';
+  // DEC-010: series del ejercicio funcional sin aporte de volumen (paseo del
+  // granjero). Se agregan aparte; no se descuentan de ningún aislamiento.
+  const NO_VOLUME_EXTRA_SETS = 2;
+
   const round = (v, d = 0) => { const m = Math.pow(10, d); return Math.round(v * m) / m; };
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
@@ -357,6 +365,24 @@
     'squat_bilateral', 'bench_press', 'shoulder_press', 'hinge', 'row_barbell', 'vertical_pull',
   ]);
 
+  // DEC-010: campos de identidad y aporte de un ejercicio del catálogo.
+  // `bucket` = dónde vive (día, rotación, lesiones); `muscle` = primario real
+  // según la tabla de aporte (null si no suma volumen de hipertrofia).
+  function exerciseFields(ex, bucket) {
+    const c = K.EXERCISE_CONTRIBUTION[ex.id];
+    return {
+      exerciseId: ex.id, bucket, muscle: c.primary,
+      muscleLabel: c.primary ? K.MUSCLE_LABELS[c.primary] : FUNCTIONAL_LABEL,
+      secondary: c.secondary.slice(),
+    };
+  }
+  function makeEntry(ex, bucket, sets) {
+    return Object.assign(exerciseFields(ex, bucket), {
+      name: ex.name, type: ex.type, pattern: ex.pattern || ex.name, unilateral: !!ex.unilateral, sets,
+      reps: `${ex.reps[0]}-${ex.reps[1]}`, rir: ex.type === 'compound' ? '2-3' : '1-2', rest: ex.type === 'compound' ? '2-3 min' : '60-90 s',
+    });
+  }
+
   // DEC-006 (corregido): la "familia" de un ejercicio es su id de patrón
   // explícito del catálogo (knowledge.js), no el texto de su nombre. Antes
   // se agrupaba por palabras del nombre y eso mezclaba por error ejercicios
@@ -462,15 +488,20 @@
         let rest = sets - per * picks.length;
         const dayEntries = picks.map(ex => {
           const n = per + (rest-- > 0 ? 1 : 0);
-          return { muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: ex.name, type: ex.type, pattern: ex.pattern || ex.name, unilateral: !!ex.unilateral, sets: n, reps: `${ex.reps[0]}-${ex.reps[1]}`, rir: ex.type === 'compound' ? '2-3' : '1-2', rest: ex.type === 'compound' ? '2-3 min' : '60-90 s' };
+          return makeEntry(ex, mu, n);
         });
         dayEntries.forEach(e => exercises.push(e));
         // DEC-005 (aclarado): con la bandera activa, el ejercicio funcional
         // se SUMA después de los principales; nunca reemplaza el patrón
-        // bilateral pesado del día. Se financia quitándole series a un
-        // aislamiento del mismo grupo ese día (o, si no hay, al último
+        // bilateral pesado del día. Si el funcional aporta volumen al grupo
+        // (step-up, búlgara con mancuernas), se financia quitándole series a
+        // un aislamiento del mismo grupo ese día (o, si no hay, al último
         // ejercicio puesto), sin bajarlo de un piso de 2 series, para no
         // tocar el volumen semanal de DEC-001.
+        // DEC-010: si NO aporta volumen (paseo del granjero, primary null),
+        // el descuento sacaría volumen real de hipertrofia sin reemplazarlo:
+        // se agrega aparte, sin descontar de nadie. Cuenta en totalSets y en
+        // la duración, no en el volumen del grupo.
         if (extra.length) {
           const ridx = rotateExtra[mu] = (rotateExtra[mu] || 0);
           rotateExtra[mu] = ridx + 1;
@@ -486,23 +517,27 @@
           const bonus = (carry && isLastOccurrence) ? carry : (others.length ? others[ridx % others.length] : extra[ridx % extra.length]);
           const bonusPattern = bonus.pattern || bonus.name;
           const alreadyThere = exercises.some(e => (e.pattern || e.name) === bonusPattern);
-          // Donante: el pick de este músculo ese día con más series de sobra
-          // (prioriza aislamientos). Se prueba con 2 series y, si no entra,
-          // con 1, antes de rendirse por falta de espacio.
-          const isolationPicks = dayEntries.filter(e => e.type === 'isolation');
-          const nonEligibleCompounds = dayEntries.filter(e => e.type === 'compound' && !TOPSET_ELIGIBLE_PATTERNS.has(e.pattern));
-          const pool = isolationPicks.length ? isolationPicks : (nonEligibleCompounds.length ? nonEligibleCompounds : dayEntries);
-          const donor = pool.slice().sort((a, b) => b.sets - a.sets)[0];
-          let bonusSets = 0;
-          if (!alreadyThere && donor) {
-            if (donor.sets - 2 >= 2) bonusSets = 2;
-            else if (donor.sets - 1 >= 2) bonusSets = 1;
+          if (K.EXERCISE_CONTRIBUTION[bonus.id].primary === null) {
+            if (!alreadyThere) exercises.push(makeEntry(bonus, mu, NO_VOLUME_EXTRA_SETS));
+          } else {
+            // Donante: el pick de este músculo ese día con más series de sobra
+            // (prioriza aislamientos). Se prueba con 2 series y, si no entra,
+            // con 1, antes de rendirse por falta de espacio.
+            const isolationPicks = dayEntries.filter(e => e.type === 'isolation');
+            const nonEligibleCompounds = dayEntries.filter(e => e.type === 'compound' && !TOPSET_ELIGIBLE_PATTERNS.has(e.pattern));
+            const pool = isolationPicks.length ? isolationPicks : (nonEligibleCompounds.length ? nonEligibleCompounds : dayEntries);
+            const donor = pool.slice().sort((a, b) => b.sets - a.sets)[0];
+            let bonusSets = 0;
+            if (!alreadyThere && donor) {
+              if (donor.sets - 2 >= 2) bonusSets = 2;
+              else if (donor.sets - 1 >= 2) bonusSets = 1;
+            }
+            if (bonusSets > 0) {
+              donor.sets -= bonusSets;
+              exercises.push(makeEntry(bonus, mu, bonusSets));
+            }
+            // si no hay de dónde financiarlo ese día sin romper el piso, no se agrega esta vez
           }
-          if (bonusSets > 0) {
-            donor.sets -= bonusSets;
-            exercises.push({ muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: bonus.name, type: bonus.type, pattern: bonusPattern, unilateral: !!bonus.unilateral, sets: bonusSets, reps: `${bonus.reps[0]}-${bonus.reps[1]}`, rir: bonus.type === 'compound' ? '2-3' : '1-2', rest: bonus.type === 'compound' ? '2-3 min' : '60-90 s' });
-          }
-          // si no hay de dónde financiarlo ese día sin romper el piso, no se agrega esta vez
         }
       });
       return { name: d.name, exercises, totalSets: exercises.reduce((a, e) => a + e.sets, 0) };
@@ -542,7 +577,7 @@
         let rest = sets - per * picks.length;
         picks.forEach(ex => {
           const n = per + (rest-- > 0 ? 1 : 0);
-          s.exercises.push({ muscle: mu, muscleLabel: K.MUSCLE_LABELS[mu], name: ex.name, type: ex.type, pattern: ex.pattern || ex.name, unilateral: !!ex.unilateral, sets: n, reps: `${ex.reps[0]}-${ex.reps[1]}`, rir: ex.type === 'compound' ? '2-3' : '1-2', rest: ex.type === 'compound' ? '2-3 min' : '60-90 s' });
+          s.exercises.push(makeEntry(ex, mu, n));
           s.totalSets += n;
         });
       });
@@ -550,7 +585,6 @@
 
     // DEC-003 v2: aviso no bloqueante si un día se pasa de 25 series. No se
     // recorta ni se mueve nada automáticamente.
-    const SESSION_SET_CAP = 25;
     sessions.forEach(s => {
       if (s.totalSets > SESSION_SET_CAP) {
         trainingWarnings.push({ level: 'warn', text: `${s.name}: ${s.totalSets} series, por encima de las ${SESSION_SET_CAP} recomendadas por sesión. No se recorta nada automáticamente; si te resulta muy largo, movés vos algún aislamiento a otro día.` });
@@ -595,11 +629,11 @@
       s.exercises.forEach(e => {
         const unilateralFactor = e.unilateral ? 2 : 1;
         if (e.topSet) {
-          seconds += unilateralFactor * (1 * (180 + 45));
-          seconds += unilateralFactor * ((e.backoffSets || 0) * (150 + 45));
+          seconds += unilateralFactor * (1 * (180 + SET_EXEC_SEC));
+          seconds += unilateralFactor * ((e.backoffSets || 0) * (150 + SET_EXEC_SEC));
         } else {
           const rest = e.type === 'compound' ? 150 : 75;
-          seconds += unilateralFactor * (e.sets * (rest + 45));
+          seconds += unilateralFactor * (e.sets * (rest + SET_EXEC_SEC));
         }
       });
       s.durationMin = Math.round(seconds / 60);
@@ -781,5 +815,5 @@
 
   function unique(arr) { return arr.filter((v, i) => v && arr.indexOf(v) === i); }
 
-  return { bmrMifflin, bmrKatch, bodyFatNavy, ffmi, classicLimit, computeMetrics, computeTargets, computeNutrition, computeTraining, computeHealthScreen, buildPlan, normalizeProfile, validateProfile, SPLITS, LB_PER_KG };
+  return { bmrMifflin, bmrKatch, bodyFatNavy, ffmi, classicLimit, computeMetrics, computeTargets, computeNutrition, computeTraining, computeHealthScreen, buildPlan, normalizeProfile, validateProfile, exerciseFields, SPLITS, LB_PER_KG };
 });

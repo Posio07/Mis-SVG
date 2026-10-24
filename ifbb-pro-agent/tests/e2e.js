@@ -81,6 +81,7 @@ const server = http.createServer((req, res) => {
   await shot('08-session-summary');
   const workouts = await page.evaluate(() => JSON.parse(localStorage.getItem('ifbb-agent:v1')).profiles[0].workouts);
   if (!workouts || workouts.length < 1 || workouts[0].reps !== 5 || workouts[0].weight !== 60) throw new Error('workout set not saved correctly: ' + JSON.stringify(workouts));
+  if (!/^[a-z]+\.[a-z_]+$/.test(workouts[0].exerciseId || '')) throw new Error('workout set saved without a stable exerciseId: ' + JSON.stringify(workouts[0]));
   await page.click('#sm-back-to-plan');
   await page.waitForSelector('#session-mode-root', { state: 'detached' });
   await page.waitForSelector('.subtabs');

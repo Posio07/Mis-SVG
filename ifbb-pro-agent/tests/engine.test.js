@@ -456,3 +456,135 @@ function stripHealthNoise(obj) {
   delete c.warnings;
   return c;
 }
+
+/* ---------- DEC-010: aporte de volumen por ejercicio ---------- */
+
+const MUSCLE_IDS = Object.keys(K.MUSCLE_LABELS);
+const catalogEntries = () => []
+  .concat(...Object.entries(K.EXERCISES).map(([bucket, list]) => list.map(entry => ({ entry, bucket, functional: false }))))
+  .concat(...Object.entries(K.FUNCTIONAL_EXERCISES).map(([bucket, list]) => list.map(entry => ({ entry, bucket, functional: true }))));
+
+test('DEC-010: cada entrada del catálogo tiene id único y una fila en la tabla de aporte (y no sobran filas)', () => {
+  const entries = catalogEntries();
+  const ids = entries.map(x => x.entry.id);
+  assert.ok(ids.every(id => typeof id === 'string' && id.length > 0), 'toda entrada necesita id');
+  assert.equal(new Set(ids).size, ids.length, 'ids repetidos en el catálogo');
+  ids.forEach(id => assert.ok(K.EXERCISE_CONTRIBUTION[id], `falta fila de aporte para ${id}`));
+  assert.deepEqual(Object.keys(K.EXERCISE_CONTRIBUTION).sort(), ids.slice().sort(), 'la tabla tiene filas sin ejercicio (o al revés)');
+  // `pattern` NO sirve de id: se repite con primarios distintos.
+  const patterns = entries.map(x => x.entry.pattern);
+  assert.ok(new Set(patterns).size < patterns.length, 'si pattern fuera único no haría falta id');
+});
+
+test('DEC-010: la tabla usa solo los 10 grupos, el secundario no repite al primario y toda fila es E4', () => {
+  Object.entries(K.EXERCISE_CONTRIBUTION).forEach(([id, c]) => {
+    assert.ok(c.primary === null || MUSCLE_IDS.includes(c.primary), `${id}: primario inválido`);
+    assert.ok(Array.isArray(c.secondary), `${id}: secondary debe ser lista`);
+    c.secondary.forEach(m => assert.ok(MUSCLE_IDS.includes(m), `${id}: secundario inválido ${m}`));
+    assert.equal(new Set(c.secondary).size, c.secondary.length, `${id}: secundarios repetidos`);
+    assert.ok(!c.secondary.includes(c.primary), `${id}: el secundario repite al primario`);
+    assert.equal(c.evidence, 'E4', `${id}: toda la tabla va E4 hasta validarla`);
+  });
+});
+
+test('DEC-010: correcciones aprobadas de la tabla de aporte', () => {
+  const C = K.EXERCISE_CONTRIBUTION;
+  assert.ok(!C['quads.squat_back_or_hack'].secondary.includes('abs'), 'sentadilla sin abs');
+  assert.ok(!C['hamstrings.rdl'].secondary.includes('back'), 'peso muerto rumano sin back');
+  assert.ok(!C['shoulders.press_overhead'].secondary.includes('chest'), 'press militar sin chest');
+  assert.ok(!C['shoulders.press_landmine_neutral'].secondary.includes('chest'), 'press landmine sin chest');
+  assert.ok(!C['glutes.kickback_cable'].secondary.includes('hamstrings'), 'patada de glúteo sin isquios');
+  assert.deepEqual(C['glutes.hip_thrust'].secondary, ['hamstrings']);
+  assert.equal(C['glutes.hip_thrust'].status, 'a_verificar', 'hip thrust → isquios queda marcado a verificar');
+  assert.equal(C['functional.farmer_carry'].primary, null, 'paseo del granjero sin primario');
+  assert.deepEqual(C['functional.farmer_carry'].secondary, [], 'paseo del granjero sin secundarios (ni abs)');
+});
+
+test('DEC-010: los nombres del catálogo son únicos (el historial viejo se mapea a exerciseId por nombre)', () => {
+  const names = catalogEntries().map(x => x.entry.name);
+  assert.equal(new Set(names).size, names.length);
+  catalogEntries().forEach(x => assert.equal(K.EXERCISE_ID_BY_NAME[x.entry.name], x.entry.id));
+  assert.equal(K.EXERCISE_INDEX['glutes.bulgarian_hip'].bucket, 'glutes');
+});
+
+test('DEC-010: reglas centralizadas con valor, nivel, fuente y fecha de revisión', () => {
+  const R = K.VALIDATOR_RULES;
+  Object.entries(R).forEach(([key, r]) => {
+    assert.ok(r.value !== undefined, `${key}: sin valor`);
+    assert.ok(['E1', 'E2', 'E3', 'E4'].includes(r.level), `${key}: nivel inválido`);
+    assert.ok(r.source === null || (r.source.label && r.source.url), `${key}: fuente mal formada`);
+    assert.match(r.reviewedAt, /^\d{4}-\d{2}-\d{2}$/, `${key}: fecha de revisión`);
+    assert.equal(r.verifiedAgainstPrimarySource, false, `${key}: nada está verificado contra la fuente primaria todavía`);
+  });
+  assert.equal(R.sessionSetCap.value, 25);
+  assert.equal(R.sessionSetCap.level, 'E4');
+  assert.equal(R.sessionSetCap.source, null);
+  assert.equal(R.sessionSetCap.reviewRequired, true);
+  assert.equal(R.setExecutionSeconds.value, 45);
+  assert.equal(R.setExecutionSeconds.assumption, true);
+  assert.equal(R.secondaryMuscleWeight.value, 0.5);
+  assert.equal(R.maxFractionalSetsPerMuscleSession.value, 11);
+});
+
+test('DEC-010: perfiles sin healthGoal ni lesiones generan el mismo plan que antes (salvo exerciseId, bucket y secondary)', () => {
+  const fx = require('./fixtures/plan-identity-baseline.json');
+  const NEW_EXERCISE_FIELDS = ['exerciseId', 'bucket', 'secondary'];
+  const strip = plan => {
+    const p = JSON.parse(JSON.stringify(plan));
+    p.training.sessions.forEach(s => s.exercises.forEach(e => NEW_EXERCISE_FIELDS.forEach(f => { delete e[f]; })));
+    return p;
+  };
+  assert.ok(Object.keys(fx.cases).length >= 10);
+  Object.entries(fx.cases).forEach(([key, c]) => {
+    assert.ok(!c.profile.healthGoal && !c.profile.injuryZones, `${key}: el fixture solo cubre perfiles sin healthGoal ni lesiones`);
+    assert.deepEqual(strip(E.buildPlan(c.profile, fx.today)), c.plan, `${key}: el plan cambió respecto de la línea base previa a DEC-010`);
+  });
+});
+
+test('DEC-010: bucket dice dónde vive y muscle es el primario real; coinciden salvo ejercicios sin aporte', () => {
+  const plan = E.buildPlan(Object.assign({}, male, { healthGoal: true }), TODAY);
+  const all = plan.training.sessions.flatMap(s => s.exercises);
+  all.forEach(e => {
+    assert.ok(e.exerciseId && K.EXERCISE_INDEX[e.exerciseId], `ejercicio sin exerciseId válido: ${e.name}`);
+    assert.equal(e.bucket, K.EXERCISE_INDEX[e.exerciseId].bucket);
+    assert.equal(e.muscle, K.EXERCISE_CONTRIBUTION[e.exerciseId].primary);
+    assert.deepEqual(e.secondary, K.EXERCISE_CONTRIBUTION[e.exerciseId].secondary);
+    if (e.muscle !== null) assert.equal(e.muscle, e.bucket);
+  });
+});
+
+test('DEC-010 / DEC-005: el paseo del granjero se agrega aparte, sin descontar series y sin aportar volumen', () => {
+  const profiles = [male, Object.assign({}, male, { daysPerWeek: 4 }), Object.assign({}, male, { daysPerWeek: 3, goal: 'maintain' }), Object.assign({}, male, { daysPerWeek: 6, goal: 'bulk' })];
+  const exec = K.VALIDATOR_RULES.setExecutionSeconds.value;
+  let carries = 0;
+  profiles.forEach(p => {
+    const plan = E.buildPlan(Object.assign({}, p, { healthGoal: true }), TODAY);
+    const all = plan.training.sessions.flatMap(s => s.exercises);
+    const carry = all.filter(e => e.exerciseId === 'functional.farmer_carry');
+    carries += carry.length;
+    carry.forEach(e => {
+      assert.equal(e.muscle, null);
+      assert.equal(e.muscleLabel, 'Funcional');
+      assert.equal(e.bucket, 'quads');
+      assert.equal(e.sets, 2);
+      assert.deepEqual(e.secondary, []);
+    });
+    // El volumen de hipertrofia de cada grupo sigue siendo exactamente el semanal.
+    Object.keys(plan.training.weeklySets).forEach(mu => {
+      const assigned = all.filter(e => e.muscle === mu).reduce((a, e) => a + e.sets, 0);
+      assert.equal(assigned, plan.training.weeklySets[mu], `${mu}: el volumen asignado cambió (${assigned} vs ${plan.training.weeklySets[mu]})`);
+    });
+    // totalSets y duración incluyen las series del paseo.
+    plan.training.sessions.forEach(s => {
+      assert.equal(s.totalSets, s.exercises.reduce((a, e) => a + e.sets, 0));
+      let seconds = 0;
+      s.exercises.forEach(e => {
+        const uf = e.unilateral ? 2 : 1;
+        if (e.topSet) seconds += uf * (180 + exec) + uf * ((e.backoffSets || 0) * (150 + exec));
+        else seconds += uf * (e.sets * ((e.type === 'compound' ? 150 : 75) + exec));
+      });
+      assert.equal(s.durationMin, Math.round(seconds / 60));
+    });
+  });
+  assert.ok(carries >= 3, 'el paseo del granjero debería aparecer en los planes con healthGoal');
+});

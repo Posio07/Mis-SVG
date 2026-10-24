@@ -330,62 +330,62 @@
    * y la búlgara funcional comparten 'split_squat' a propósito. */
   const EXERCISES = {
     chest: [
-      { name: 'Press banca con barra', type: 'compound', reps: [6, 10], pattern: 'bench_press' },
-      { name: 'Press inclinado con mancuernas', type: 'compound', reps: [8, 12], pattern: 'incline_press' },
-      { name: 'Fondos en paralelas o press en máquina', type: 'compound', reps: [8, 12], pattern: 'chest_dip_or_machine' },
-      { name: 'Aperturas en polea o pec-deck', type: 'isolation', reps: [10, 15], pattern: 'chest_fly' },
+      { id: 'chest.bench_press_barbell', name: 'Press banca con barra', type: 'compound', reps: [6, 10], pattern: 'bench_press' },
+      { id: 'chest.incline_press_db', name: 'Press inclinado con mancuernas', type: 'compound', reps: [8, 12], pattern: 'incline_press' },
+      { id: 'chest.dip_or_machine_press', name: 'Fondos en paralelas o press en máquina', type: 'compound', reps: [8, 12], pattern: 'chest_dip_or_machine' },
+      { id: 'chest.fly_cable_pecdeck', name: 'Aperturas en polea o pec-deck', type: 'isolation', reps: [10, 15], pattern: 'chest_fly' },
     ],
     back: [
-      { name: 'Dominadas o jalón al pecho', type: 'compound', reps: [6, 10], pattern: 'vertical_pull' },
-      { name: 'Remo con barra o remo pendlay', type: 'compound', reps: [6, 10], pattern: 'row_barbell' },
-      { name: 'Remo en polea baja o máquina', type: 'compound', reps: [8, 12], pattern: 'row_cable' },
-      { name: 'Pullover en polea', type: 'isolation', reps: [10, 15], pattern: 'pullover' },
+      { id: 'back.vertical_pull', name: 'Dominadas o jalón al pecho', type: 'compound', reps: [6, 10], pattern: 'vertical_pull' },
+      { id: 'back.row_barbell', name: 'Remo con barra o remo pendlay', type: 'compound', reps: [6, 10], pattern: 'row_barbell' },
+      { id: 'back.row_cable', name: 'Remo en polea baja o máquina', type: 'compound', reps: [8, 12], pattern: 'row_cable' },
+      { id: 'back.pullover_cable', name: 'Pullover en polea', type: 'isolation', reps: [10, 15], pattern: 'pullover' },
     ],
     shoulders: [
-      { name: 'Press militar con barra o mancuernas', type: 'compound', reps: [6, 10], pattern: 'shoulder_press' },
-      { name: 'Elevaciones laterales con mancuerna', type: 'isolation', reps: [10, 15], pattern: 'lateral_raise' },
-      { name: 'Elevaciones laterales en polea', type: 'isolation', reps: [12, 15], pattern: 'lateral_raise' },
-      { name: 'Face pull / pájaros (deltoides posterior)', type: 'isolation', reps: [12, 15], pattern: 'rear_delt' },
+      { id: 'shoulders.press_overhead', name: 'Press militar con barra o mancuernas', type: 'compound', reps: [6, 10], pattern: 'shoulder_press' },
+      { id: 'shoulders.lateral_raise_db', name: 'Elevaciones laterales con mancuerna', type: 'isolation', reps: [10, 15], pattern: 'lateral_raise' },
+      { id: 'shoulders.lateral_raise_cable', name: 'Elevaciones laterales en polea', type: 'isolation', reps: [12, 15], pattern: 'lateral_raise' },
+      { id: 'shoulders.rear_delt_facepull', name: 'Face pull / pájaros (deltoides posterior)', type: 'isolation', reps: [12, 15], pattern: 'rear_delt' },
       // DEC-009: sustituto del press por encima de la cabeza cuando hay
       // lesión de hombro declarada. `injuryOnly` lo saca de la rotación
       // normal: sin esa lesión declarada, el catálogo de hombros se
       // comporta exactamente igual que antes de DEC-009 (mismas 4 opciones,
       // mismo orden). No es top-set-eligible (DEC-008): un sustituto por
       // lesión no se carga al máximo por defecto.
-      { name: 'Press landmine o con agarre neutro', type: 'compound', reps: [8, 12], pattern: 'shoulder_press_safe', injuryOnly: 'shoulder' },
+      { id: 'shoulders.press_landmine_neutral', name: 'Press landmine o con agarre neutro', type: 'compound', reps: [8, 12], pattern: 'shoulder_press_safe', injuryOnly: 'shoulder' },
     ],
     quads: [
-      { name: 'Sentadilla trasera o sentadilla en hack', type: 'compound', reps: [6, 10], pattern: 'squat_bilateral' },
-      { name: 'Prensa de piernas', type: 'compound', reps: [8, 12], pattern: 'leg_press' },
-      { name: 'Zancadas o sentadilla búlgara', type: 'compound', reps: [8, 12], unilateral: true, pattern: 'split_squat' },
-      { name: 'Extensión de cuádriceps', type: 'isolation', reps: [10, 15], pattern: 'knee_extension' },
+      { id: 'quads.squat_back_or_hack', name: 'Sentadilla trasera o sentadilla en hack', type: 'compound', reps: [6, 10], pattern: 'squat_bilateral' },
+      { id: 'quads.leg_press', name: 'Prensa de piernas', type: 'compound', reps: [8, 12], pattern: 'leg_press' },
+      { id: 'quads.lunge_or_bulgarian', name: 'Zancadas o sentadilla búlgara', type: 'compound', reps: [8, 12], unilateral: true, pattern: 'split_squat' },
+      { id: 'quads.leg_extension', name: 'Extensión de cuádriceps', type: 'isolation', reps: [10, 15], pattern: 'knee_extension' },
     ],
     hamstrings: [
-      { name: 'Peso muerto rumano', type: 'compound', reps: [6, 10], pattern: 'hinge' },
-      { name: 'Curl femoral tumbado o sentado', type: 'isolation', reps: [10, 15], pattern: 'leg_curl' },
+      { id: 'hamstrings.rdl', name: 'Peso muerto rumano', type: 'compound', reps: [6, 10], pattern: 'hinge' },
+      { id: 'hamstrings.leg_curl', name: 'Curl femoral tumbado o sentado', type: 'isolation', reps: [10, 15], pattern: 'leg_curl' },
     ],
     glutes: [
-      { name: 'Hip thrust con barra', type: 'compound', reps: [6, 10], pattern: 'hip_thrust' },
-      { name: 'Sentadilla búlgara con énfasis en cadera', type: 'compound', reps: [8, 12], unilateral: true, pattern: 'split_squat' },
-      { name: 'Abducción de cadera en máquina', type: 'isolation', reps: [12, 15], pattern: 'hip_abduction' },
-      { name: 'Patada de glúteo en polea', type: 'isolation', reps: [12, 15], unilateral: true, pattern: 'glute_kickback' },
+      { id: 'glutes.hip_thrust', name: 'Hip thrust con barra', type: 'compound', reps: [6, 10], pattern: 'hip_thrust' },
+      { id: 'glutes.bulgarian_hip', name: 'Sentadilla búlgara con énfasis en cadera', type: 'compound', reps: [8, 12], unilateral: true, pattern: 'split_squat' },
+      { id: 'glutes.hip_abduction_machine', name: 'Abducción de cadera en máquina', type: 'isolation', reps: [12, 15], pattern: 'hip_abduction' },
+      { id: 'glutes.kickback_cable', name: 'Patada de glúteo en polea', type: 'isolation', reps: [12, 15], unilateral: true, pattern: 'glute_kickback' },
     ],
     calves: [
-      { name: 'Elevación de talones de pie', type: 'isolation', reps: [8, 12], pattern: 'calf_raise_standing' },
-      { name: 'Elevación de talones sentado', type: 'isolation', reps: [12, 15], pattern: 'calf_raise_seated' },
+      { id: 'calves.calf_raise_standing', name: 'Elevación de talones de pie', type: 'isolation', reps: [8, 12], pattern: 'calf_raise_standing' },
+      { id: 'calves.calf_raise_seated', name: 'Elevación de talones sentado', type: 'isolation', reps: [12, 15], pattern: 'calf_raise_seated' },
     ],
     biceps: [
-      { name: 'Curl con barra o barra Z', type: 'isolation', reps: [8, 12], pattern: 'curl_barbell' },
-      { name: 'Curl inclinado con mancuernas', type: 'isolation', reps: [10, 15], pattern: 'curl_incline' },
+      { id: 'biceps.curl_barbell', name: 'Curl con barra o barra Z', type: 'isolation', reps: [8, 12], pattern: 'curl_barbell' },
+      { id: 'biceps.curl_incline', name: 'Curl inclinado con mancuernas', type: 'isolation', reps: [10, 15], pattern: 'curl_incline' },
     ],
     triceps: [
-      { name: 'Press cerrado o fondos', type: 'compound', reps: [6, 10], pattern: 'close_grip_press' },
-      { name: 'Extensión de tríceps en polea', type: 'isolation', reps: [10, 15], pattern: 'triceps_extension' },
+      { id: 'triceps.close_grip_or_dips', name: 'Press cerrado o fondos', type: 'compound', reps: [6, 10], pattern: 'close_grip_press' },
+      { id: 'triceps.pushdown_cable', name: 'Extensión de tríceps en polea', type: 'isolation', reps: [10, 15], pattern: 'triceps_extension' },
     ],
     abs: [
-      { name: 'Crunch en polea o rueda abdominal', type: 'isolation', reps: [10, 15], pattern: 'ab_flexion' },
-      { name: 'Elevaciones de piernas colgado', type: 'isolation', reps: [10, 15], pattern: 'leg_raise' },
-      { name: 'Vacuum abdominal (Classic / Physique)', type: 'isolation', reps: [5, 8], pattern: 'vacuum' },
+      { id: 'abs.crunch_or_wheel', name: 'Crunch en polea o rueda abdominal', type: 'isolation', reps: [10, 15], pattern: 'ab_flexion' },
+      { id: 'abs.hanging_leg_raise', name: 'Elevaciones de piernas colgado', type: 'isolation', reps: [10, 15], pattern: 'leg_raise' },
+      { id: 'abs.vacuum', name: 'Vacuum abdominal (Classic / Physique)', type: 'isolation', reps: [5, 8], pattern: 'vacuum' },
     ],
   };
 
@@ -394,9 +394,9 @@
    * respaldo específico en la literatura citada). */
   const FUNCTIONAL_EXERCISES = {
     quads: [
-      { name: 'Sentadilla búlgara con mancuernas', type: 'compound', reps: [8, 12], unilateral: true, pattern: 'split_squat' },
-      { name: 'Step-up con carga', type: 'compound', reps: [8, 12], unilateral: true, pattern: 'step_up' },
-      { name: 'Paseo del granjero', type: 'compound', reps: [20, 40], pattern: 'loaded_carry' },
+      { id: 'functional.bulgarian_db', name: 'Sentadilla búlgara con mancuernas', type: 'compound', reps: [8, 12], unilateral: true, pattern: 'split_squat' },
+      { id: 'functional.step_up', name: 'Step-up con carga', type: 'compound', reps: [8, 12], unilateral: true, pattern: 'step_up' },
+      { id: 'functional.farmer_carry', name: 'Paseo del granjero', type: 'compound', reps: [20, 40], pattern: 'loaded_carry' },
     ],
   };
 
@@ -448,5 +448,90 @@
     ankle: { calves: ['calf_raise_standing'], quads: ['split_squat'], glutes: ['split_squat'] },
   };
 
-  return { SOURCES, ACTIVITY, DIVISIONS, CLASSIC_WEIGHT_TABLE, EXERCISES, FUNCTIONAL_EXERCISES, MUSCLE_LABELS, SUPPLEMENTS, PLATES_KG, PLATES_LB, PLATE_COLORS, DEFAULT_BAR_WEIGHT, BARBELL_PATTERNS, INJURY_ZONES, INJURY_LABELS, INJURY_EXCLUSIONS };
+  /* DEC-010 · Aporte de volumen por ejercicio.
+   * El "bucket" (EXERCISES[mu] / FUNCTIONAL_EXERCISES[mu]) solo define dónde
+   * vive el ejercicio: día, rotación, lesiones. El aporte de volumen sale de
+   * esta tabla, por `id` único de cada entrada del catálogo (el `pattern` NO
+   * sirve de id: `split_squat` se repite con primarios distintos).
+   * primary = grupo que suma 1.0 (null = sin aporte de hipertrofia);
+   * secondary = grupos que suman 0.5. Solo los 10 grupos de MUSCLE_LABELS.
+   * Toda la tabla es E4 (criterio de la app, sin fuente) hasta validarla. */
+  const contribution = (primary, secondary, extra) => Object.assign({ primary, secondary, evidence: 'E4' }, extra);
+  const EXERCISE_CONTRIBUTION = {
+    'chest.bench_press_barbell': contribution('chest', ['shoulders', 'triceps']),
+    'chest.incline_press_db': contribution('chest', ['shoulders', 'triceps']),
+    'chest.dip_or_machine_press': contribution('chest', ['shoulders', 'triceps']),
+    'chest.fly_cable_pecdeck': contribution('chest', ['shoulders']),
+    'back.vertical_pull': contribution('back', ['biceps', 'shoulders']),
+    'back.row_barbell': contribution('back', ['biceps', 'shoulders']),
+    'back.row_cable': contribution('back', ['biceps', 'shoulders']),
+    'back.pullover_cable': contribution('back', ['chest']),
+    'shoulders.press_overhead': contribution('shoulders', ['triceps']),
+    'shoulders.lateral_raise_db': contribution('shoulders', []),
+    'shoulders.lateral_raise_cable': contribution('shoulders', []),
+    'shoulders.rear_delt_facepull': contribution('shoulders', ['back']),
+    'shoulders.press_landmine_neutral': contribution('shoulders', ['triceps']),
+    'quads.squat_back_or_hack': contribution('quads', ['glutes']),
+    'quads.leg_press': contribution('quads', ['glutes']),
+    'quads.lunge_or_bulgarian': contribution('quads', ['glutes']),
+    'quads.leg_extension': contribution('quads', []),
+    'hamstrings.rdl': contribution('hamstrings', ['glutes']),
+    'hamstrings.leg_curl': contribution('hamstrings', []),
+    'glutes.hip_thrust': contribution('glutes', ['hamstrings'], { status: 'a_verificar' }),
+    'glutes.bulgarian_hip': contribution('glutes', ['quads']),
+    'glutes.hip_abduction_machine': contribution('glutes', []),
+    'glutes.kickback_cable': contribution('glutes', []),
+    'calves.calf_raise_standing': contribution('calves', []),
+    'calves.calf_raise_seated': contribution('calves', []),
+    'biceps.curl_barbell': contribution('biceps', []),
+    'biceps.curl_incline': contribution('biceps', []),
+    'triceps.close_grip_or_dips': contribution('triceps', ['chest', 'shoulders']),
+    'triceps.pushdown_cable': contribution('triceps', []),
+    'abs.crunch_or_wheel': contribution('abs', []),
+    'abs.hanging_leg_raise': contribution('abs', []),
+    'abs.vacuum': contribution('abs', []),
+    'functional.bulgarian_db': contribution('quads', ['glutes']),
+    'functional.step_up': contribution('quads', ['glutes']),
+    // Ejercicio funcional (agarre, trapecio, core): no suma volumen de
+    // hipertrofia a ninguno de los 10 grupos. Vive en el bucket "quads" solo
+    // por la rotación de DEC-005.
+    'functional.farmer_carry': contribution(null, []),
+  };
+
+  /* Índice id -> { entry, bucket, functional } y nombre -> id (para mapear el
+   * historial viejo, que solo guardó `exercise` con el nombre en texto). */
+  const EXERCISE_INDEX = {};
+  const EXERCISE_ID_BY_NAME = {};
+  [[EXERCISES, false], [FUNCTIONAL_EXERCISES, true]].forEach(([group, functional]) => {
+    Object.keys(group).forEach(bucket => group[bucket].forEach(entry => {
+      EXERCISE_INDEX[entry.id] = { entry, bucket, functional };
+      EXERCISE_ID_BY_NAME[entry.name] = entry.id;
+    }));
+  });
+
+  /* DEC-010 · Reglas del validador, centralizadas: valor, nivel de evidencia,
+   * fuente y fecha de revisión. `verifiedAgainstPrimarySource: false` en todas
+   * (el spec exige verificar cada valor contra el texto completo de su fuente
+   * primaria antes de fijarlo; solo se consultaron resúmenes). */
+  const REVIEWED = '2026-10-23';
+  const rule = (value, level, source, extra) => Object.assign({ value, level, source, reviewedAt: REVIEWED, verifiedAgainstPrimarySource: false }, extra);
+  const VALIDATOR_RULES = {
+    // R1 · tope por músculo por sesión
+    maxFractionalSetsPerMuscleSession: rule(11, 'E3', { label: 'Pelland et al., meta-regresiones del volumen por sesión (preprint, SportRxiv)', url: 'https://sportrxiv.org/index.php/server/preprint/view/537' }),
+    secondaryMuscleWeight: rule(0.5, 'E4', null, { note: 'Convención del spec: directa = 1, indirecta = 0,5.' }),
+    // R2 · piso semanal y frecuencia
+    minWeeklySetsPerMuscle: rule(10, 'E1', { label: 'ACSM 2026, postura sobre prescripción del entrenamiento de fuerza (resumen)', url: 'https://recmanagement.com/articles/155711/acsm-unveils-landmark-2026-resistance-training-guidelines' }),
+    minWeeklyFrequencyMajorGroups: rule(2, 'E1', { label: 'ACSM 2026, postura sobre prescripción del entrenamiento de fuerza (resumen)', url: 'https://recmanagement.com/articles/155711/acsm-unveils-landmark-2026-resistance-training-guidelines' }),
+    // R3 · rampa de progresión
+    maxWeeklyVolumeIncreasePct: rule(20, 'E4', { label: 'FAPESP: la progresión óptima de volumen no está definida', url: 'https://bv.fapesp.br/en/bolsas/223465/URL' }),
+    maxAcuteChronicRatio: rule(1.3, 'E4', { label: 'Gabbett, ratio de carga aguda/crónica', url: 'https://research.usq.edu.au/item/q6y98/workload-monitoring-and-athlete-management' }),
+    historyWindowWeeks: rule(4, 'E4', null),
+    minHistoryWeeksForRamp: rule(2, 'E4', null, { note: 'Con menos de 2 semanas de historial es usuario nuevo; con 2 o 3 se compara contra el promedio de las semanas disponibles.' }),
+    // R4 · duración derivada
+    setExecutionSeconds: rule(45, 'E4', null, { assumption: true, note: 'Valor inicial fijo (transición + ejecución por serie), supuesto: se calibrará con los tiempos reales del modo sesión.' }),
+    // DEC-003 v2 · tope de series por sesión (aviso no bloqueante)
+    sessionSetCap: rule(25, 'E4', null, { reviewRequired: true, note: 'Criterio de la app sin fuente: marcado para revisión.' }),
+  };
+
+  return { SOURCES, ACTIVITY, DIVISIONS, CLASSIC_WEIGHT_TABLE, EXERCISES, FUNCTIONAL_EXERCISES, MUSCLE_LABELS, SUPPLEMENTS, PLATES_KG, PLATES_LB, PLATE_COLORS, DEFAULT_BAR_WEIGHT, BARBELL_PATTERNS, INJURY_ZONES, INJURY_LABELS, INJURY_EXCLUSIONS, EXERCISE_CONTRIBUTION, EXERCISE_INDEX, EXERCISE_ID_BY_NAME, VALIDATOR_RULES };
 });

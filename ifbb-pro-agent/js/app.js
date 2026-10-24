@@ -840,9 +840,10 @@
   // no cambia ningún cálculo del plan.
   function exerciseDurationMin(e) {
     const uf = e.unilateral ? 2 : 1;
+    const exec = KNOWLEDGE.VALIDATOR_RULES.setExecutionSeconds.value; // DEC-010
     let seconds = 0;
-    if (e.topSet) { seconds += uf * (180 + 45); seconds += uf * ((e.backoffSets || 0) * (150 + 45)); }
-    else { const rest = e.type === 'compound' ? 150 : 75; seconds += uf * (e.sets * (rest + 45)); }
+    if (e.topSet) { seconds += uf * (180 + exec); seconds += uf * ((e.backoffSets || 0) * (150 + exec)); }
+    else { const rest = e.type === 'compound' ? 150 : 75; seconds += uf * (e.sets * (rest + exec)); }
     return Math.round(seconds / 60);
   }
 
@@ -857,10 +858,10 @@
   // Alternativa dentro del mismo grupo muscular para un ejercicio marcado
   // por dolor: el siguiente de la lista del catálogo que no esté excluido
   // por las zonas declaradas ni sea el propio ejercicio marcado.
-  function findPainSubstitute(pattern, muscle, zones, profile) {
-    const lib = KNOWLEDGE.EXERCISES[muscle] || [];
+  function findPainSubstitute(pattern, bucket, zones, profile) {
+    const lib = KNOWLEDGE.EXERCISES[bucket] || [];
     const excluded = new Set([pattern]);
-    zones.forEach(z => { const map = KNOWLEDGE.INJURY_EXCLUSIONS[z]; if (map && map[muscle]) map[muscle].forEach(p => excluded.add(p)); });
+    zones.forEach(z => { const map = KNOWLEDGE.INJURY_EXCLUSIONS[z]; if (map && map[bucket]) map[bucket].forEach(p => excluded.add(p)); });
     const flags = (profile.painFlags || {});
     return lib.find(ex => !excluded.has(ex.pattern) && !(flags[ex.pattern] && flags[ex.pattern].flagged) && (!ex.injuryOnly || zones.indexOf(ex.injuryOnly) !== -1));
   }
@@ -874,8 +875,10 @@
       let ex = e, substitutedFrom = null;
       const flag = flags[e.pattern];
       if (flag && flag.flagged) {
-        const alt = findPainSubstitute(e.pattern, e.muscle, zones, profile);
-        if (alt) { substitutedFrom = e.name; ex = Object.assign({}, e, { name: alt.name, pattern: alt.pattern, reps: `${alt.reps[0]}-${alt.reps[1]}`, topSet: null, backoffSets: 0 }); }
+        // DEC-010: la lista de sustitutos sale del bucket donde vive el
+        // ejercicio; el sustituto trae su propia identidad y aporte.
+        const alt = findPainSubstitute(e.pattern, e.bucket, zones, profile);
+        if (alt) { substitutedFrom = e.name; ex = Object.assign({}, e, ENGINE.exerciseFields(alt, e.bucket), { name: alt.name, pattern: alt.pattern, reps: `${alt.reps[0]}-${alt.reps[1]}`, topSet: null, backoffSets: 0 }); }
       }
       const sets = [];
       if (ex.topSet) {
@@ -885,9 +888,9 @@
         for (let i = 0; i < ex.sets; i++) sets.push({ setType: 'normal', setNumber: i + 1, repsLabel: ex.reps, restLabel: ex.rest });
       }
       return {
-        name: ex.name, muscle: ex.muscle, muscleLabel: ex.muscleLabel, type: ex.type, pattern: ex.pattern, unilateral: ex.unilateral,
+        name: ex.name, exerciseId: ex.exerciseId, bucket: ex.bucket, muscle: ex.muscle, muscleLabel: ex.muscleLabel, type: ex.type, pattern: ex.pattern, unilateral: ex.unilateral,
         durationMin: exerciseDurationMin(ex), sets, substitutedFrom,
-        painScale: injuryAffectsMuscle(ex.muscle, zones),
+        painScale: injuryAffectsMuscle(ex.bucket, zones),
       };
     });
   }
@@ -1022,7 +1025,7 @@
     profile.workouts = profile.workouts || [];
     profile.workouts.push({
       sessionId: sm.sessionId, date: todayIso(), dayIndex: sm.dayIndex, dayName: sm.dayName,
-      exercise: ex.name, muscle: ex.muscle, setType: st.setType, setNumber: st.setNumber,
+      exercise: ex.name, exerciseId: ex.exerciseId, muscle: ex.muscle, setType: st.setType, setNumber: st.setNumber,
       weight, reps, pain, short: sm.short, savedAt: Date.now(),
     });
     profile.updatedAt = todayIso();

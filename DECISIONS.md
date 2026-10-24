@@ -78,6 +78,8 @@ Este archivo es la fuente de verdad de la lógica de negocio. Antes de cambiar c
 
 **Segundo bug encontrado en verificación (punto 4):** el reparto de los 3 ejercicios funcionales era un round-robin simple, pero cuádriceps solo entrena 2 veces por semana en todos los splits: con 3 opciones y 2 ocurrencias, "paseo del granjero" (el 3º de la lista) nunca llegaba a salir. Corregido reservando el acarreo para la última vez que el músculo aparece esa semana, y rotando las otras dos opciones (búlgara, step-up) en las ocurrencias anteriores. También se ajustó a qué ejercicio se le quitan series para financiarlo: antes podía tocar el propio ejercicio con top set si no había aislamiento ese día; ahora prioriza un compuesto sin top set (p. ej. prensa) antes que el que lo tiene.
 
+**Corrección por DEC-010:** la regla de financiamiento descrita arriba solo vale para los funcionales que SÍ aportan volumen de hipertrofia al grupo (búlgara con mancuernas y step-up: primario cuádriceps, glúteo secundario). El paseo del granjero no aporta a ningún grupo: si se financiara quitándole series a un aislamiento, el volumen real de cuádriceps bajaría hasta 2 series por semana sin que nada lo reemplace. Por eso el paseo ahora se agrega aparte (2 series, `muscle: null`, etiqueta "Funcional"), sin descontar de ningún ejercicio. Cuenta en `totalSets` y en la duración, no en el volumen del grupo. Efecto visible, solo con la bandera activa: el último día de pierna suma 2 series y, en los 10 perfiles de prueba, entre 6 y 13 minutos de duración, y puede acercarse o cruzar el aviso de 25 series.
+
 ## DEC-008 · Elegibilidad del top set
 - El top set solo se asigna a multiarticulares bilaterales con carga libre o guiada pesada, de esta lista: sentadilla trasera, sentadilla hack, press banca, press militar, peso muerto rumano, remo con barra, dominadas/fondos lastrados.
 - Nunca a unilaterales ni a máquinas de press.
@@ -146,3 +148,17 @@ Visible en el perfil y en el plan cuando haya cualquier condición declarada (ta
 - Sin condiciones declaradas → el plan queda idéntico al que generaba el motor antes de DEC-009.
 
 **Estado: implementada.**
+
+## DEC-010 · Aporte de volumen por ejercicio (base del validador)
+Contexto: `docs/specs/validador.md` (23-oct-2026). El validador necesita contar series fraccionadas por músculo (primario 1.0, secundario 0.5) y un historial confiable. Hasta ahora el "músculo" de un ejercicio era el grupo donde vive en el catálogo, sin secundarios.
+
+- **Ubicación ≠ aporte.** El bucket (`EXERCISES[grupo]` / `FUNCTIONAL_EXERCISES[grupo]`) define dónde vive un ejercicio: día, rotación, mapa de lesiones. El aporte de volumen sale de una tabla por ejercicio (`EXERCISE_CONTRIBUTION` en `knowledge.js`).
+- **Campos del ejercicio en el plan:** `exerciseId`, `bucket` (dónde vive), `muscle` (primario real; `null` si no suma volumen de hipertrofia), `muscleLabel` ("Funcional" cuando `muscle` es null) y `secondary` (lista, peso 0.5). Para todo el catálogo salvo el paseo del granjero `muscle` coincide con `bucket`, así que ningún plan sin `healthGoal` cambia.
+- **`exerciseId` único por entrada del catálogo, estable e inmutable** (`grupo.slug`, p. ej. `glutes.bulgarian_hip`). `pattern` no sirve de id: `split_squat` aparece 3 veces con primarios distintos y `lateral_raise` 2 veces en el mismo bucket. El nombre es solo de pantalla.
+- **Historial:** cada serie de `profile.workouts` guarda `exerciseId` desde ahora. Las series viejas solo tienen `exercise` (nombre): se mapean por nombre con `EXERCISE_ID_BY_NAME`, posible porque los nombres del catálogo son únicos (hay un test que lo exige).
+- **Tabla de aporte (todo E4: criterio de la app, sin fuente, hasta validarla).** Solo los 10 grupos existentes como primario/secundario. Correcciones aprobadas sobre la propuesta inicial: sin `abs` en sentadilla, sin `back` en peso muerto rumano, sin `chest` en press militar ni en press landmine, sin isquios en patada de glúteo. Hip thrust → isquios queda marcado `status: 'a_verificar'`. Paseo del granjero: sin aporte en ningún grupo (ni siquiera abs).
+- **Configuración central** (`VALIDATOR_RULES` en `knowledge.js`, sin JSON externo): cada regla con `value`, `level` (E1-E4), `source`, `reviewedAt` y `verifiedAgainstPrimarySource` (false en todas: solo se consultaron resúmenes; el spec exige verificar contra la fuente primaria antes de fijar cada valor). `sessionSetCap` (25, el aviso de DEC-003 v2) entra como E4, sin fuente y con `reviewRequired: true`. `setExecutionSeconds` (45) es un supuesto fijo, a calibrar con tiempos reales del modo sesión. El motor ya lee de ahí el tope de 25 y los 45 s; los valores de R1-R3 están cargados pero todavía no los consume ninguna regla (fases siguientes).
+- **DEC-005:** ver "Corrección por DEC-010" en esa decisión (el paseo del granjero se agrega sin descontar series).
+- Tests: tabla completa y sin filas huérfanas; correcciones aprobadas; ids y nombres únicos; reglas bien formadas; identidad contra una línea base capturada con el motor anterior (10 perfiles sin `healthGoal` ni lesiones, salvo `exerciseId`/`bucket`/`secondary`); paseo del granjero sin descuento y con volumen semanal intacto.
+
+**Estado: implementada (Fase 1).** Todavía no hay validación ni recortes: esta decisión solo prepara los datos.
