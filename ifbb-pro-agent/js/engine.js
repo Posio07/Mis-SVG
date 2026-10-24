@@ -817,9 +817,21 @@
       injuries: carried.injuries.map(i => {
         const before = was[i.zone];
         const worsened = !!before && ((!!i.painNow && !before.painNow) || !!i.diagnosed !== !!before.diagnosed);
-        return worsened ? Object.assign({}, i, { clearanceDate: null }) : i;
+        // `clearanceInvalidated` marca las zonas que PERDIERON una autorización ya
+        // dada porque empeoraron (la pantalla de pausa lo explica, a diferencia de
+        // la primera autorización). Se mantiene mientras la zona siga sin confirmar.
+        // Solo existe la clave cuando vale true.
+        const reauth = worsened ? (!!before.clearanceDate || !!before.clearanceInvalidated) : (!!before && !!before.clearanceInvalidated && !i.clearanceDate);
+        const next = worsened ? Object.assign({}, i, { clearanceDate: null }) : i;
+        return reauth ? Object.assign({}, next, { clearanceInvalidated: true }) : next;
       }),
     });
+  }
+
+  // Zonas que hoy esperan una confirmación NUEVA porque empeoraron después de
+  // haber sido autorizadas (no las que nunca se autorizaron).
+  function zonesPendingReauthorization(health) {
+    return ((health && health.injuries) || []).filter(i => i.clearanceInvalidated && !i.clearanceDate).map(i => i.zone);
   }
 
   /* ---------- DEC-009 / DEC-011: dolor en Modo sesión ---------- */
@@ -956,5 +968,5 @@
 
   function unique(arr) { return arr.filter((v, i) => v && arr.indexOf(v) === i); }
 
-  return { bmrMifflin, bmrKatch, bodyFatNavy, ffmi, classicLimit, computeMetrics, computeTargets, computeNutrition, computeTraining, computeHealthScreen, buildPlan, normalizeProfile, validateProfile, exerciseFields, carryOverInjuryClearances, reconcileInjuryClearances, applyPainReading, painProfessionalAdvice, exportProfile, prepareImportedProfile, localHealthConflicts, SPLITS, LB_PER_KG };
+  return { bmrMifflin, bmrKatch, bodyFatNavy, ffmi, classicLimit, computeMetrics, computeTargets, computeNutrition, computeTraining, computeHealthScreen, buildPlan, normalizeProfile, validateProfile, exerciseFields, carryOverInjuryClearances, reconcileInjuryClearances, zonesPendingReauthorization, applyPainReading, painProfessionalAdvice, exportProfile, prepareImportedProfile, localHealthConflicts, SPLITS, LB_PER_KG };
 });

@@ -461,7 +461,10 @@
         <div class="alert danger">${esc(h.blockReason)}</div>
         <p class="muted">Esto no es un diagnóstico: es el resultado del tamizaje previo al ejercicio (ACSM/Riebe 2015) que completaste en Datos. Si ya consultaste y tenés autorización para entrenar a intensidad vigorosa, marcala para continuar.</p>
         <div class="btn-row"><button class="btn btn-primary" id="btn-medical-clearance">Tengo autorización médica</button></div>` : '';
+    // Zonas que se piden de nuevo por haber empeorado (no la primera autorización).
+    const reauthZones = ENGINE.zonesPendingReauthorization(h).map(z => KNOWLEDGE.INJURY_LABELS[z] || z);
     const injuryPart = h.injuryBlockReason ? `
+        ${reauthZones.length ? `<div class="alert warn">Se pide de nuevo porque registraste dolor o cambiaste el diagnóstico en ${esc(reauthZones.join(', '))}.</div>` : ''}
         <div class="alert danger">${esc(h.injuryBlockReason)} ${evTag('E4')}</div>
         <p class="muted">Derivación: un médico o fisioterapeuta puede decirte si podés entrenar y cómo. La app no reemplaza esa valoración.</p>
         ${h.injuryClearance.pendingZones.map(z => `
@@ -489,6 +492,7 @@
       const inj = ((profile.data.health && profile.data.health.injuries) || []).find(i => i.zone === btn.dataset.injuryClearance);
       if (!inj) return;
       inj.clearanceDate = todayIso();
+      delete inj.clearanceInvalidated;
       profile.updatedAt = todayIso(); save(); toast('Autorización registrada'); renderPlan();
     });
     $('#btn-edit-health').onclick = () => { ui.editingId = profile.id; go('data'); };

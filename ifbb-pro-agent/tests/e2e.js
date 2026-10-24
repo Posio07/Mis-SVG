@@ -165,6 +165,7 @@ const server = http.createServer((req, res) => {
   const pausa = await page.textContent('#view');
   if (!/Plan en pausa/.test(pausa) || !/no puede adaptar una rutina a una lesión/.test(pausa) || !/Hombro/.test(pausa) || !/E4/.test(pausa)) throw new Error('la pausa por lesión no muestra advertencia + derivación + etiqueta E4: ' + pausa.slice(0, 400));
   if (/adaptad[oa] a (tu|la) lesi/i.test(pausa)) throw new Error('un texto afirma que la rutina está adaptada a la lesión');
+  if (/Se pide de nuevo/.test(pausa)) throw new Error('la primera pausa por lesión no debe llevar la línea de re-autorización');
   await page.click('[data-injury-clearance="shoulder"]');
   await page.waitForSelector('.subtabs');
   const clearedHealth = await page.evaluate(() => JSON.parse(localStorage.getItem('ifbb-agent:v1')).profiles.find(p => p.data.name === 'Lesión · Test').data.health);
@@ -215,6 +216,7 @@ const server = http.createServer((req, res) => {
   await page.click('button[type=submit]');
   await page.waitForSelector('[data-injury-clearance="knee"]');
   if (await page.$('[data-injury-clearance="shoulder"]')) throw new Error('al agregar una zona no debería volver a pedirse la ya confirmada');
+  if (/Se pide de nuevo/.test(await page.textContent('#view'))) throw new Error('una zona NUEVA es una primera autorización: no lleva la línea de re-autorización');
   const afterAdd = await page.evaluate(() => JSON.parse(localStorage.getItem('ifbb-agent:v1')).profiles.find(p => p.data.name === 'Lesión · Test').data.health.injuries);
   if (afterAdd.find(i => i.zone === 'shoulder').clearanceDate !== clearedHealth.injuries[0].clearanceDate) throw new Error('se perdió la fecha de la zona ya confirmada');
 
@@ -231,6 +233,11 @@ const server = http.createServer((req, res) => {
   await page.waitForSelector('[data-injury-clearance="shoulder"]');
   if (await page.$('.subtabs')) throw new Error('subir el dolor de una zona autorizada debería pausar el plan');
   if (await page.$('[data-injury-clearance="knee"]')) throw new Error('la rodilla no empeoró: no debería volver a pedirse');
+  // La línea explica el motivo, nombra solo la zona que empeoró y va ARRIBA del texto de siempre.
+  const pausaDolor = await page.textContent('#view');
+  const lineaReauth = pausaDolor.match(/Se pide de nuevo porque registraste dolor o cambiaste el diagnóstico en ([^.]*)\./);
+  if (!lineaReauth || lineaReauth[1] !== 'Hombro') throw new Error('la pausa por subida de dolor debería explicar el motivo y nombrar solo el Hombro: ' + (lineaReauth ? lineaReauth[1] : pausaDolor.slice(0, 300)));
+  if (pausaDolor.indexOf('Se pide de nuevo') > pausaDolor.indexOf('Declaraste una lesión')) throw new Error('la línea de re-autorización debe ir arriba del texto actual');
   const afterPainUp = await injuriesOf();
   if (afterPainUp.find(i => i.zone === 'shoulder').clearanceDate !== null || afterPainUp.find(i => i.zone === 'knee').clearanceDate !== authorized.find(i => i.zone === 'knee').clearanceDate) throw new Error('la invalidación debería ser solo de la zona que empeoró: ' + JSON.stringify(afterPainUp));
   await page.click('[data-injury-clearance="shoulder"]');
@@ -241,8 +248,12 @@ const server = http.createServer((req, res) => {
   await editInjuries(() => page.check('input[name=injuryDiagnosed][value=knee]')); // cambia el diagnóstico de la rodilla
   await page.waitForSelector('[data-injury-clearance="knee"]');
   if (await page.$('[data-injury-clearance="shoulder"]') || await page.$('.subtabs')) throw new Error('un cambio de diagnóstico debería pausar el plan solo por esa zona');
+  const pausaDiag = (await page.textContent('#view')).match(/Se pide de nuevo porque registraste dolor o cambiaste el diagnóstico en ([^.]*)\./);
+  if (!pausaDiag || pausaDiag[1] !== 'Rodilla') throw new Error('la pausa por cambio de diagnóstico debería nombrar solo la Rodilla: ' + (pausaDiag && pausaDiag[1]));
   await page.click('[data-injury-clearance="knee"]');
   await page.waitForSelector('.subtabs');
+  const afterReconfirm = await injuriesOf();
+  if (afterReconfirm.some(i => 'clearanceInvalidated' in i)) throw new Error('al confirmar se debe apagar la marca de re-autorización: ' + JSON.stringify(afterReconfirm));
 
   // DEC-009 (privacidad) en navegador: el export descargado no trae datos de
   // salud; importar un archivo viejo (con health y painFlags) los ignora, y si ya

@@ -992,3 +992,53 @@ test('DEC-010: el motor lee las series del paseo del granjero desde VALIDATOR_RU
   });
   assert.equal(rule.value, original, 'el test restauró el valor');
 });
+
+/* ---------- DEC-011: la pausa explica cuándo una zona se pide de nuevo por empeorar ---------- */
+
+test('DEC-011: reconcile marca solo las zonas que PERDIERON una autorización por empeorar; la primera autorización no se marca', () => {
+  const stored = authorizedProfile(['shoulder', 'knee']);
+  const up = editAndReconcile(stored, ['shoulder', 'knee'], { pain: ['shoulder'] });
+  assert.deepEqual(E.zonesPendingReauthorization(up.health), ['shoulder']);
+  assert.equal(up.health.injuries.find(i => i.zone === 'shoulder').clearanceInvalidated, true);
+  assert.ok(!('clearanceInvalidated' in up.health.injuries.find(i => i.zone === 'knee')), 'la clave solo existe cuando vale true');
+  // Cambio de diagnóstico en cualquier sentido también marca.
+  assert.deepEqual(E.zonesPendingReauthorization(editAndReconcile(stored, ['shoulder', 'knee'], { diagnosed: ['knee'] }).health), ['knee']);
+  assert.deepEqual(E.zonesPendingReauthorization(editAndReconcile(authorizedProfile(['knee'], { diagnosed: ['knee'] }), ['knee']).health), ['knee']);
+  // Primera autorización: zona nueva, o zona declarada que nunca se autorizó (aunque empeore): no se marca.
+  assert.deepEqual(E.zonesPendingReauthorization(editAndReconcile(stored, ['shoulder', 'knee', 'ankle']).health), []);
+  const neverAuthorized = E.normalizeProfile(withInjury(['shoulder']));
+  assert.deepEqual(E.zonesPendingReauthorization(E.reconcileInjuryClearances(neverAuthorized.health, E.normalizeProfile(withInjury(['shoulder'], { injuryPainNow: ['shoulder'] })).health)), []);
+  // Perfiles sin lesiones o sin salud: nada.
+  assert.deepEqual(E.zonesPendingReauthorization(E.normalizeProfile(male).health), []);
+  assert.deepEqual(E.zonesPendingReauthorization(undefined), []);
+});
+
+test('DEC-011: la marca de re-autorización sobrevive a más ediciones hasta confirmar, y se apaga al confirmar', () => {
+  const stored = authorizedProfile(['shoulder', 'knee']);
+  const worsened = editAndReconcile(stored, ['shoulder', 'knee'], { pain: ['shoulder'] }).health;
+  // Otra edición sin relación (no confirmaron todavía): sigue marcada. Aunque el dolor baje, sigue pendiente.
+  const again = E.reconcileInjuryClearances(worsened, E.normalizeProfile(withInjury(['shoulder', 'knee'])).health);
+  assert.deepEqual(E.zonesPendingReauthorization(again), ['shoulder']);
+  assert.equal(again.injuries.find(i => i.zone === 'shoulder').clearanceDate, null);
+  // Empeora de nuevo estando pendiente: sigue siendo una re-autorización, no una primera vez.
+  const worseAgain = E.reconcileInjuryClearances(again, E.normalizeProfile(withInjury(['shoulder', 'knee'], { injuryPainNow: ['shoulder'] })).health);
+  assert.deepEqual(E.zonesPendingReauthorization(worseAgain), ['shoulder']);
+  // Al confirmar (fecha nueva, la clave se borra) deja de estar pendiente; aunque la clave quedara, con fecha no cuenta.
+  const confirmed = cleared(worseAgain, 'shoulder', '2026-09-20');
+  assert.deepEqual(E.zonesPendingReauthorization(confirmed), []);
+  const confirmedClean = JSON.parse(JSON.stringify(confirmed)); delete confirmedClean.injuries.find(i => i.zone === 'shoulder').clearanceInvalidated;
+  assert.deepEqual(E.zonesPendingReauthorization(confirmedClean), []);
+  // Si después de confirmar vuelve a empeorar, es otra re-autorización.
+  const edited = E.reconcileInjuryClearances(confirmedClean, E.normalizeProfile(withInjury(['shoulder', 'knee'], { injuryPainNow: ['shoulder'], injuryDiagnosed: ['shoulder'] })).health);
+  assert.deepEqual(E.zonesPendingReauthorization(edited), ['shoulder']);
+});
+
+test('DEC-011: la marca de re-autorización no altera el plan (solo la pantalla la usa) y no sale en el export', () => {
+  const stored = authorizedProfile(['shoulder']);
+  const worsened = editAndReconcile(stored, ['shoulder'], { pain: ['shoulder'] });
+  const plain = E.buildPlan(E.normalizeProfile(withInjury(['shoulder'], { injuryPainNow: ['shoulder'] })), TODAY);
+  assert.deepEqual(Object.keys(worsened.plan.health).sort(), Object.keys(plain.health).sort(), 'no hay claves nuevas en plan.health');
+  assert.equal(worsened.plan.health.injuryBlockReason, plain.health.injuryBlockReason, 'el texto de la pausa del motor es el mismo');
+  const exported = E.exportProfile({ id: 'x', data: Object.assign({}, E.normalizeProfile(withInjury(['shoulder'])), { health: worsened.health }) });
+  assert.doesNotMatch(JSON.stringify(exported), /clearanceInvalidated/);
+});
