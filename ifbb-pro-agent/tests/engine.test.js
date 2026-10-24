@@ -1042,3 +1042,187 @@ test('DEC-011: la marca de re-autorización no altera el plan (solo la pantalla 
   const exported = E.exportProfile({ id: 'x', data: Object.assign({}, E.normalizeProfile(withInjury(['shoulder'])), { health: worsened.health }) });
   assert.doesNotMatch(JSON.stringify(exported), /clearanceInvalidated/);
 });
+
+/* ---------- DEC-012: tabla de músculos por ejercicio en data/exercise-muscles.csv ---------- */
+
+const fsMuscles = require('node:fs');
+const pathMuscles = require('node:path');
+const cryptoMuscles = require('node:crypto');
+const MB = require('../../scripts/build-exercise-muscles.js');
+const SNAP = require('../../scripts/snapshot-plan-hashes.js');
+const csvText = () => fsMuscles.readFileSync(MB.CSV_PATH, 'utf8');
+const csvRows = () => { const p = MB.parseExerciseMuscles(csvText()); assert.deepEqual(p.errors, [], 'el CSV tiene errores de validación'); return p.rows; };
+const catalogIds = () => Object.keys(K.EXERCISE_INDEX);
+
+test('DEC-012: todo exerciseId del CSV existe en el catálogo y viceversa (salvo los funcionales sin aporte declarados)', () => {
+  const inCsv = new Set(csvRows().map(r => r.exerciseId));
+  const inCatalog = new Set(catalogIds());
+  [...inCsv].forEach(id => assert.ok(inCatalog.has(id), `el CSV tiene un exerciseId que no existe en el catálogo: ${id}`));
+  const exempt = new Set(K.NO_MUSCLE_CONTRIBUTION);
+  [...inCatalog].forEach(id => {
+    if (exempt.has(id)) assert.ok(!inCsv.has(id), `${id} está declarado sin aporte: no puede tener filas en el CSV`);
+    else assert.ok(inCsv.has(id), `el ejercicio del catálogo no tiene filas en el CSV: ${id}`);
+  });
+  assert.deepEqual(K.NO_MUSCLE_CONTRIBUTION, ['functional.farmer_carry'], 'el paseo del granjero es el único sin aporte');
+  assert.ok(inCatalog.size === 35 && inCsv.size === 34);
+});
+
+test('DEC-012: cada ejercicio tiene exactamente un primary, salvo el paseo del granjero (ninguno)', () => {
+  const primaries = {};
+  csvRows().forEach(r => { if (r.role === 'primary') primaries[r.exerciseId] = (primaries[r.exerciseId] || 0) + 1; });
+  catalogIds().forEach(id => {
+    const expected = K.NO_MUSCLE_CONTRIBUTION.includes(id) ? 0 : 1;
+    assert.equal(primaries[id] || 0, expected, `${id}: debería tener ${expected} fila(s) primary`);
+  });
+  // Y ningún músculo repite en un mismo ejercicio (ni como primary y secondary a la vez).
+  const seen = new Set();
+  csvRows().forEach(r => { const k = `${r.exerciseId}|${r.muscle}`; assert.ok(!seen.has(k), `repetido: ${k}`); seen.add(k); });
+});
+
+test('DEC-012: role, evidence_level, muscle y fecha solo tienen valores válidos; verificado y probable llevan source', () => {
+  assert.deepEqual(MB.ROLES, ['primary', 'secondary']);
+  assert.deepEqual(MB.LEVELS, ['verificado', 'probable', 'a_verificar']);
+  assert.deepEqual(MB.MUSCLE_IDS.slice().sort(), Object.keys(K.MUSCLE_LABELS).sort(), 'los ids de músculo del script y de knowledge.js se desalinearon');
+  csvRows().forEach(r => {
+    const who = `${r.exerciseId} / ${r.muscle}`;
+    assert.ok(MB.ROLES.includes(r.role), `${who}: role`);
+    assert.ok(MB.LEVELS.includes(r.evidence_level), `${who}: evidence_level`);
+    assert.ok(MB.MUSCLE_IDS.includes(r.muscle), `${who}: muscle`);
+    assert.match(r.review_date, /^\d{4}-\d{2}-\d{2}$/, `${who}: review_date`);
+    assert.ok(r.notes.length > 0, `${who}: toda fila lleva una nota`);
+    if (r.evidence_level === 'verificado' || r.evidence_level === 'probable') assert.ok(r.source.length > 0, `${who}: ${r.evidence_level} sin source`);
+  });
+});
+
+test('DEC-012: una fuente citada tiene autor, año y título (no hay citas vacías o a medias en verificado/probable)', () => {
+  csvRows().filter(r => r.evidence_level !== 'a_verificar').forEach(r => {
+    r.source.split(' | ').forEach(cite => {
+      assert.match(cite, /^[^.]+ et al\.|^[A-ZÁÉÍÓÚ][^.]+\. \d{4}\./, `${r.exerciseId} / ${r.muscle}: cita sin autor y año: ${cite.slice(0, 60)}`);
+      assert.match(cite, /\b(19|20)\d{2}\b/, `${r.exerciseId} / ${r.muscle}: cita sin año`);
+      assert.ok(cite.length > 60, `${r.exerciseId} / ${r.muscle}: cita demasiado corta para tener título y revista`);
+    });
+  });
+});
+
+test('DEC-012: el parser lee igual un CSV con coma y uno con punto y coma (Excel en español: BOM y CRLF)', () => {
+  const comma = MB.parseExerciseMuscles(csvText());
+  assert.equal(comma.delimiter, ',');
+  const table = MB.parseCsv(csvText(), ',');
+  const quote = (c, d) => (new RegExp(`["${d}\\n\\r]`).test(c) ? '"' + c.replace(/"/g, '""') + '"' : c);
+  const semicolon = '﻿' + table.map(r => r.map(c => quote(c, ';')).join(';')).join('\r\n') + '\r\n';
+  const semi = MB.parseExerciseMuscles(semicolon);
+  assert.equal(semi.delimiter, ';');
+  assert.deepEqual(semi.errors, []);
+  assert.deepEqual(semi.rows, comma.rows, 'coma y punto y coma tienen que dar las mismas filas');
+  // También coma con CRLF y sin comillas innecesarias.
+  const crlf = MB.parseExerciseMuscles(table.map(r => r.map(c => quote(c, ',')).join(',')).join('\r\n'));
+  assert.deepEqual(crlf.rows, comma.rows);
+  assert.equal(comma.rows.length, 61);
+});
+
+test('DEC-012: el parser respeta comillas, delimitadores y saltos de línea dentro de un campo', () => {
+  const tricky = 'a;b "c", d\ne;f';
+  const row = ['x.y', 'chest', 'primary', 'probable', tricky, 'nota, con "comillas"; y\nsalto', '2026-10-24'];
+  for (const d of [',', ';']) {
+    const q = c => '"' + c.replace(/"/g, '""') + '"';
+    const text = MB.COLUMNS.join(d) + '\n' + row.map(q).join(d) + '\n';
+    const p = MB.parseExerciseMuscles(text);
+    assert.equal(p.delimiter, d);
+    assert.deepEqual(p.errors, []);
+    assert.equal(p.rows[0].source, tricky);
+    assert.equal(p.rows[0].notes, 'nota, con "comillas"; y\nsalto');
+  }
+  assert.equal(MB.detectDelimiter('exerciseId;muscle;role'), ';');
+  assert.equal(MB.detectDelimiter('exerciseId,muscle,role'), ',');
+  assert.equal(MB.detectDelimiter('"a;b",c,d'), ',', 'un punto y coma dentro de comillas no cuenta como separador');
+  assert.throws(() => MB.parseCsv('a,"b', ','), /comillas sin cerrar/);
+});
+
+test('DEC-012: el parser rechaza datos inválidos con un mensaje que dice la fila y el motivo', () => {
+  const head = MB.COLUMNS.join(',') + '\n';
+  const ok = 'quads.leg_press,quads,primary,verificado,"Autor A. 2020. Título. Revista 1:1",nota,2026-10-24\n';
+  assert.deepEqual(MB.parseExerciseMuscles(head + ok).errors, []);
+  const errs = line => MB.parseExerciseMuscles(head + line + '\n').errors.join(' | ');
+  assert.match(errs('quads.leg_press,quads,antagonist,verificado,"S",n,2026-10-24'), /role inválido "antagonist"/);
+  assert.match(errs('quads.leg_press,quads,primary,seguro,"S",n,2026-10-24'), /evidence_level inválido "seguro"/);
+  assert.match(errs('quads.leg_press,rodilla,primary,verificado,"S",n,2026-10-24'), /muscle inválido "rodilla"/);
+  assert.match(errs('quads.leg_press,quads,primary,verificado,,n,2026-10-24'), /verificado sin source/);
+  assert.match(errs('quads.leg_press,quads,primary,probable,,n,2026-10-24'), /probable sin source/);
+  assert.equal(MB.parseExerciseMuscles(head + 'quads.leg_press,quads,primary,a_verificar,,n,2026-10-24\n').errors.length, 0, 'a_verificar puede ir sin source');
+  assert.match(errs('quads.leg_press,quads,primary,a_verificar,,n,24/10/2026'), /review_date debe ser AAAA-MM-DD/);
+  assert.match(errs('quads.leg_press,quads,primary,a_verificar,,n,2026-13-45'), /review_date/);
+  assert.match(errs(',quads,primary,a_verificar,,n,2026-10-24'), /exerciseId vacío/);
+  assert.match(MB.parseExerciseMuscles(head + ok + ok).errors.join(' | '), /fila repetida/);
+  assert.match(MB.parseExerciseMuscles(head + ok + 'quads.leg_press,glutes,primary,a_verificar,,n,2026-10-24\n').errors.join(' | '), /2 filas primary/);
+  assert.match(MB.parseExerciseMuscles('exerciseId,muscle\nx,y\n').errors.join(' | '), /Faltan columnas: role, evidence_level, source, notes, review_date/);
+  assert.match(MB.parseExerciseMuscles(MB.COLUMNS.join(',') + ',extra\n').errors.join(' | '), /Columnas desconocidas: extra/);
+  assert.match(MB.parseExerciseMuscles('').errors.join(' | '), /vacío/);
+  assert.throws(() => MB.buildFromCsvText(head + 'x,quads,antagonist,verificado,,n,2026-10-24\n'), /inválido/);
+});
+
+test('DEC-012: ifbb-pro-agent/js/exerciseMuscles.js coincide con el CSV (si se edita uno sin regenerar el otro, falla)', () => {
+  assert.equal(fsMuscles.readFileSync(MB.MODULE_PATH, 'utf8'), MB.buildFromCsvText(csvText()),
+    'el módulo está desactualizado: correr `node scripts/build-exercise-muscles.js`');
+  const EM = require('../js/exerciseMuscles.js');
+  assert.deepEqual(EM.rows, csvRows());
+});
+
+test('DEC-012: el catálogo toma muscle, secondary y evidence_level del CSV, en su orden', () => {
+  const rows = csvRows();
+  catalogIds().forEach(id => {
+    const c = K.EXERCISE_CONTRIBUTION[id];
+    const mine = rows.filter(r => r.exerciseId === id);
+    const primary = mine.find(r => r.role === 'primary');
+    const secondary = mine.filter(r => r.role === 'secondary');
+    assert.equal(c.primary, primary ? primary.muscle : null, `${id}: primary`);
+    assert.deepEqual(c.secondary, secondary.map(r => r.muscle), `${id}: secondary (mismo orden que el CSV)`);
+    assert.equal(c.evidenceLevel.primary, primary ? primary.evidence_level : null, `${id}: nivel del primary`);
+    assert.deepEqual(c.evidenceLevel.secondary, Object.fromEntries(secondary.map(r => [r.muscle, r.evidence_level])), `${id}: niveles de los secondary`);
+    assert.deepEqual(c.rows, mine, `${id}: las filas (fuente, nota, fecha) viajan con el dato`);
+    assert.equal(c.evidence, 'E4', 'la etiqueta de la app no cambia');
+    assert.equal(c.status === 'a_verificar', mine.some(r => r.evidence_level === 'a_verificar'), `${id}: status derivado`);
+  });
+  const carry = K.EXERCISE_CONTRIBUTION['functional.farmer_carry'];
+  assert.deepEqual([carry.primary, carry.secondary, carry.rows], [null, [], []]);
+  // Los secundarios que no se confirman están marcados, incluido el de hip thrust a isquios.
+  assert.equal(K.EXERCISE_CONTRIBUTION['glutes.hip_thrust'].evidenceLevel.secondary.hamstrings, 'a_verificar');
+});
+
+test('DEC-012: la tabla contiene solo lo investigado: hip thrust a isquios no se confirma y los conflictos con Pelland quedan marcados', () => {
+  const row = (id, m) => csvRows().find(r => r.exerciseId === id && r.muscle === m);
+  assert.equal(row('glutes.hip_thrust', 'hamstrings').evidence_level, 'a_verificar');
+  assert.match(row('glutes.hip_thrust', 'hamstrings').notes, /Plotkin 2023 midió el área de isquios con hip thrust/);
+  assert.equal(row('glutes.bulgarian_hip', 'quads').evidence_level, 'a_verificar', 'Pelland la clasifica como directa para cuádriceps');
+  assert.equal(row('back.pullover_cable', 'back').evidence_level, 'a_verificar', 'Di Fonza 2026: el pullover parece activar más el pectoral');
+  assert.equal(row('glutes.hip_thrust', 'glutes').evidence_level, 'verificado');
+  assert.equal(row('quads.leg_press', 'glutes').evidence_level, 'verificado');
+  assert.equal(row('quads.squat_back_or_hack', 'glutes').evidence_level, 'verificado');
+  const levels = {};
+  csvRows().forEach(r => { const k = `${r.role}|${r.evidence_level}`; levels[k] = (levels[k] || 0) + 1; });
+  assert.deepEqual(levels, { 'primary|probable': 14, 'secondary|probable': 12, 'primary|verificado': 13, 'secondary|verificado': 5, 'primary|a_verificar': 7, 'secondary|a_verificar': 10 });
+});
+
+test('DEC-012: evidence_level viaja en los datos pero ningún cálculo lo consume todavía', () => {
+  const engineSrc = fsMuscles.readFileSync(pathMuscles.join(__dirname, '../js/engine.js'), 'utf8');
+  assert.doesNotMatch(engineSrc, /evidenceLevel|evidence_level|\.rows\b/, 'engine.js no debe leer el nivel de evidencia todavía');
+  const plan = E.buildPlan(Object.assign({}, male, { healthGoal: true }), TODAY);
+  const keys = new Set(plan.training.sessions.flatMap(s => s.exercises.flatMap(e => Object.keys(e))));
+  ['evidenceLevel', 'evidence_level', 'rows', 'status', 'source'].forEach(k => assert.ok(!keys.has(k), `el plan no debe exponer ${k}`));
+});
+
+test('DEC-012: la salida del plan es idéntica a la de main antes de esta fase (30 planes, huellas)', () => {
+  const fx = require('./fixtures/plan-hashes.json');
+  const now = SNAP.computeHashes(E);
+  assert.equal(Object.keys(fx.cases).length, 30);
+  assert.equal(now.today, fx.today);
+  const different = Object.keys(fx.cases).filter(k => fx.cases[k] !== now.cases[k]);
+  assert.deepEqual(different, [], `cambió la salida del plan en: ${different.join(', ')}. Si es intencional, regenerar con scripts/snapshot-plan-hashes.js`);
+  // La huella es sensible: cambiar un dato mínimo del plan cambia el hash.
+  const plan = E.buildPlan(male, TODAY);
+  const tweaked = JSON.parse(JSON.stringify(plan));
+  tweaked.training.sessions[0].exercises[0].secondary.push('abs');
+  assert.notEqual(SNAP.hash(plan), SNAP.hash(tweaked));
+  const reordered = JSON.parse(JSON.stringify(plan));
+  reordered.input = Object.fromEntries(Object.entries(reordered.input).reverse());
+  assert.equal(SNAP.hash(plan), SNAP.hash(reordered), 'el orden de las claves no cambia la huella');
+});

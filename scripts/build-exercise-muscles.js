@@ -90,6 +90,9 @@ function parseExerciseMuscles(text) {
     seen.add(key);
     rows.push(row);
   });
+  const primaries = {};
+  rows.forEach(r => { if (r.role === 'primary') primaries[r.exerciseId] = (primaries[r.exerciseId] || 0) + 1; });
+  Object.entries(primaries).forEach(([id, n]) => { if (n > 1) errors.push(`${id}: tiene ${n} filas primary (solo puede haber una)`); });
   return { rows, delimiter, errors };
 }
 
